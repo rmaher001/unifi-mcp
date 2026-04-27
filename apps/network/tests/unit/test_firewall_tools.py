@@ -319,6 +319,69 @@ class TestCreateZoneTargetingValidation:
         assert result["success"] is False
         assert "network_ids" in result["error"]
 
+    @pytest.mark.asyncio
+    async def test_ip_object_targeting_with_ip_group_id_passes_validation(self):
+        """IP targeting with matching_target_type=OBJECT and ip_group_id (ips empty) should pass.
+
+        UniFi V2 firewall policies that reference a reusable IP group object use this
+        pattern: source/destination has matching_target_type=OBJECT, ip_group_id set,
+        and ips=[]. The validator must allow this combination.
+        """
+        zone_data = {
+            "name": "Allow VLAN to internal host",
+            "action": "ALLOW",
+            "protocol": "all",
+            "source": {
+                "zone_id": "internal-zone",
+                "matching_target": "IP",
+                "matching_target_type": "OBJECT",
+                "ip_group_id": "group_internal_hosts",
+                "ips": [],
+            },
+            "destination": {
+                "zone_id": "trusted-zone",
+                "matching_target": "IP",
+                "matching_target_type": "SPECIFIC",
+                "ips": ["192.168.1.100"],
+            },
+        }
+        created_raw = {**zone_data, "_id": "new_obj_001"}
+        mock_created = MagicMock()
+        mock_created.raw = created_raw
+
+        with patch("unifi_network_mcp.tools.firewall.firewall_manager") as mock_fm:
+            mock_fm.create_firewall_policy = AsyncMock(return_value=mock_created)
+
+            from unifi_network_mcp.tools.firewall import create_firewall_policy
+
+            result = await create_firewall_policy(policy_data=zone_data, confirm=True)
+
+        assert result["success"] is True
+        assert result["policy_id"] == "new_obj_001"
+
+    @pytest.mark.asyncio
+    async def test_ip_object_targeting_without_ip_group_id_fails(self):
+        """IP targeting with matching_target_type=OBJECT but no ip_group_id should fail."""
+        zone_data = {
+            "name": "Bad object policy",
+            "action": "ALLOW",
+            "source": {
+                "zone_id": "internal",
+                "matching_target": "IP",
+                "matching_target_type": "OBJECT",
+                "ips": [],
+                # missing ip_group_id
+            },
+            "destination": {"zone_id": "wan", "matching_target": "ANY"},
+        }
+
+        from unifi_network_mcp.tools.firewall import create_firewall_policy
+
+        result = await create_firewall_policy(policy_data=zone_data, confirm=True)
+
+        assert result["success"] is False
+        assert "ip_group_id" in result["error"]
+
 
 # ---------------------------------------------------------------------------
 # Legacy V1 field migration errors (#210)

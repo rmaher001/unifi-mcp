@@ -201,6 +201,44 @@ async def test_get_event_happy_path(tmp_path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_event_surfaces_plate_identity(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("UNIFI_API_DB_KEY", "k")
+    app, key, cid = await _bootstrap(tmp_path)
+    _stub_connection(app, cid)
+
+    payload = {
+        "id": "ev-2",
+        "type": "smartDetectZone",
+        "start": 1700000000,
+        "end": 1700000010,
+        "camera_id": "cam-1",
+        "score": 88,
+        "recognized_plate_text": "ABC123",
+        "recognized_plate_group_id": "plate-group-1",
+        "recognized_plate_confidence": 88,
+    }
+
+    async def fake(self, event_id):
+        assert event_id == "ev-2"
+        return payload
+
+    from unifi_core.protect.managers.event_manager import EventManager
+
+    monkeypatch.setattr(EventManager, "get_event", fake)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.get(
+            f"/v1/sites/default/events/ev-2?controller={cid}",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["data"]["recognized_plate_text"] == "ABC123"
+    assert body["data"]["recognized_plate_group_id"] == "plate-group-1"
+    assert body["data"]["recognized_plate_confidence"] == 88
+
+
+@pytest.mark.asyncio
 async def test_get_event_404_via_unifi_not_found(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("UNIFI_API_DB_KEY", "k")
     app, key, cid = await _bootstrap(tmp_path)

@@ -364,6 +364,44 @@ class TestEventManagerGetEvent:
         cm.client.get_events.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_backfills_plate_metadata_from_list_path(self):
+        """get_event's detail endpoint drops the plate group id (keeps text +
+        confidence); recover the stable group id from the list/search path,
+        mirroring the face backfill."""
+        detail_event = _make_event(
+            id="evt-lpr-1",
+            type=EventType.SMART_DETECT,
+            smart_detect_types=[SmartDetectObjectType.LICENSE_PLATE, SmartDetectObjectType.VEHICLE],
+            # detail thumbnail carries the plate text + confidence but NO group.id
+            metadata={"detectedThumbnails": [{"type": "vehicle", "name": "ABC123", "confidence": 90}]},
+        )
+        list_event = _make_event(
+            id="evt-lpr-1",
+            type=EventType.SMART_DETECT,
+            smart_detect_types=[SmartDetectObjectType.LICENSE_PLATE, SmartDetectObjectType.VEHICLE],
+            metadata={
+                "detectedThumbnails": [
+                    {
+                        "type": "vehicle",
+                        "name": "ABC123",
+                        "group": {"id": "plate-group-1", "matchedName": "ABC123", "confidence": 91},
+                    }
+                ]
+            },
+        )
+        cm = _make_connection_manager()
+        cm.client.get_event = AsyncMock(return_value=detail_event)
+        cm.client.get_events = AsyncMock(return_value=[list_event])
+        mgr = EventManager(cm)
+
+        result = await mgr.get_event("evt-lpr-1")
+
+        assert result["recognized_plate_text"] == "ABC123"
+        assert result["recognized_plate_group_id"] == "plate-group-1"
+        assert result["recognized_plate_confidence"] == 91
+        cm.client.get_events.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_not_found(self):
         cm = _make_connection_manager()
         cm.client.get_event = AsyncMock(side_effect=Exception("404 Not Found"))

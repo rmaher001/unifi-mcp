@@ -64,6 +64,9 @@ class Event:
     recognized_person_id: strawberry.ID | None
     recognized_person_name: str | None
     recognized_person_confidence: int | None
+    recognized_plate_text: str | None
+    recognized_plate_group_id: strawberry.ID | None
+    recognized_plate_confidence: int | None
     detected_thumbnail_id: strawberry.ID | None
 
     # Context for relationship edges — NOT in SDL, NOT in to_dict().
@@ -92,6 +95,9 @@ class Event:
             recognized_person_id=_get(obj, "recognized_person_id"),
             recognized_person_name=_get(obj, "recognized_person_name"),
             recognized_person_confidence=_get(obj, "recognized_person_confidence"),
+            recognized_plate_text=_get(obj, "recognized_plate_text"),
+            recognized_plate_group_id=_get(obj, "recognized_plate_group_id"),
+            recognized_plate_confidence=_get(obj, "recognized_plate_confidence"),
             detected_thumbnail_id=_get(obj, "detected_thumbnail_id"),
         )
 
@@ -108,6 +114,9 @@ class Event:
             "recognized_person_id": self.recognized_person_id,
             "recognized_person_name": self.recognized_person_name,
             "recognized_person_confidence": self.recognized_person_confidence,
+            "recognized_plate_text": self.recognized_plate_text,
+            "recognized_plate_group_id": self.recognized_plate_group_id,
+            "recognized_plate_confidence": self.recognized_plate_confidence,
             "detected_thumbnail_id": self.detected_thumbnail_id,
         }
 
@@ -130,6 +139,9 @@ class SmartDetection:
     recognized_person_id: strawberry.ID | None
     recognized_person_name: str | None
     recognized_person_confidence: int | None
+    recognized_plate_text: str | None
+    recognized_plate_group_id: strawberry.ID | None
+    recognized_plate_confidence: int | None
     detected_thumbnail_id: strawberry.ID | None
 
     @classmethod
@@ -155,6 +167,9 @@ class SmartDetection:
             recognized_person_id=_get(obj, "recognized_person_id"),
             recognized_person_name=_get(obj, "recognized_person_name"),
             recognized_person_confidence=_get(obj, "recognized_person_confidence"),
+            recognized_plate_text=_get(obj, "recognized_plate_text"),
+            recognized_plate_group_id=_get(obj, "recognized_plate_group_id"),
+            recognized_plate_confidence=_get(obj, "recognized_plate_confidence"),
             detected_thumbnail_id=_get(obj, "detected_thumbnail_id"),
         )
 
@@ -171,6 +186,9 @@ class SmartDetection:
             "recognized_person_id": self.recognized_person_id,
             "recognized_person_name": self.recognized_person_name,
             "recognized_person_confidence": self.recognized_person_confidence,
+            "recognized_plate_text": self.recognized_plate_text,
+            "recognized_plate_group_id": self.recognized_plate_group_id,
+            "recognized_plate_confidence": self.recognized_plate_confidence,
             "detected_thumbnail_id": self.detected_thumbnail_id,
         }
 

@@ -643,6 +643,9 @@ type Event {
   recognizedPersonId: ID
   recognizedPersonName: String
   recognizedPersonConfidence: Int
+  recognizedPlateText: String
+  recognizedPlateGroupId: ID
+  recognizedPlateConfidence: Int
   detectedThumbnailId: ID
 }
 
@@ -1628,6 +1631,9 @@ type SmartDetection {
   recognizedPersonId: ID
   recognizedPersonName: String
   recognizedPersonConfidence: Int
+  recognizedPlateText: String
+  recognizedPlateGroupId: ID
+  recognizedPlateConfidence: Int
   detectedThumbnailId: ID
 }
 

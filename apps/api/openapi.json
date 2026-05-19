@@ -2270,6 +2270,39 @@
             ],
             "title": "Recognized Person Name"
           },
+          "recognized_plate_confidence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recognized Plate Confidence"
+          },
+          "recognized_plate_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recognized Plate Group Id"
+          },
+          "recognized_plate_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recognized Plate Text"
+          },
           "score": {
             "anyOf": [
               {
@@ -5566,6 +5599,39 @@
               }
             ],
             "title": "Recognized Person Name"
+          },
+          "recognized_plate_confidence": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recognized Plate Confidence"
+          },
+          "recognized_plate_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recognized Plate Group Id"
+          },
+          "recognized_plate_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recognized Plate Text"
           },
           "score": {
             "anyOf": [

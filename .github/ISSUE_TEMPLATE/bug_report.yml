@@ -9,6 +9,8 @@ body:
       value: |
         Thanks for taking the time to report a bug. Please do not include UniFi credentials, API keys, tokens, or private controller details.
 
+        If your bug involves one of the MCP servers (Network / Protect / Access), the controller fields below are critical for reproduction — please fill them in even if they feel redundant.
+
         If this is a security vulnerability, do not open a public issue. Use GitHub Security Advisories instead: https://github.com/sirkirby/unifi-mcp/security/advisories
   - type: checkboxes
     id: preflight
@@ -45,20 +47,101 @@ body:
       placeholder: "unifi-network-mcp 0.0.0, main@abcdef0, or ghcr.io/..."
     validations:
       required: true
-  - type: textarea
-    id: environment
+  - type: dropdown
+    id: controller_host
     attributes:
-      label: Environment
-      description: Include OS, Python/Node versions, MCP client, install method, and UniFi application/controller versions.
-      placeholder: |
-        OS:
-        Python:
-        Node:
-        MCP client:
-        Install method:
-        UniFi application/controller:
+      label: Controller hardware / host
+      description: Where the UniFi controller runs. Required for MCP server bugs.
+      options:
+        - UDM Pro
+        - UDM Pro Max
+        - UDM SE
+        - UDM (base)
+        - UDR / UDR7
+        - UCG Max / UCG Ultra / UCG Fiber
+        - Cloud Key Gen2 / Gen2+
+        - Self-hosted (Linux)
+        - Self-hosted (Docker)
+        - UniFi-hosted (Site Manager / Cloud Console)
+        - Other
+        - N/A — not an MCP server bug
     validations:
       required: true
+  - type: input
+    id: unifi_os
+    attributes:
+      label: UniFi OS version
+      description: Settings → System on the controller UI. Required for MCP server bugs.
+      placeholder: "e.g. 4.0.21"
+  - type: input
+    id: network_app
+    attributes:
+      label: Network application version
+      description: Required if reporting a Network MCP bug. Settings → System → Updates → "Network".
+      placeholder: "e.g. 9.0.108"
+  - type: input
+    id: protect_app
+    attributes:
+      label: Protect application version
+      description: Required if reporting a Protect MCP bug.
+      placeholder: "e.g. 5.1.66"
+  - type: input
+    id: access_app
+    attributes:
+      label: Access application version
+      description: Required if reporting an Access MCP bug.
+      placeholder: "e.g. 1.27.5"
+  - type: input
+    id: site_setup
+    attributes:
+      label: Site setup
+      description: Multi-site, recently restored from backup, mid-firmware-upgrade, unusual DPI/IDS config, etc.
+      placeholder: "Single site, default config"
+  - type: input
+    id: install_method
+    attributes:
+      label: Install method
+      placeholder: "uvx, pip, Docker image tag, plugin marketplace, source"
+    validations:
+      required: true
+  - type: input
+    id: client_os
+    attributes:
+      label: OS where the MCP client runs
+      placeholder: "macOS 15.1, Ubuntu 24.04, Windows 11"
+    validations:
+      required: true
+  - type: input
+    id: mcp_client
+    attributes:
+      label: MCP client
+      description: The host running the MCP server (Claude Code, Claude Desktop, Codex, custom, etc.).
+      placeholder: "Claude Code 1.x, Claude Desktop, Codex CLI"
+    validations:
+      required: true
+  - type: input
+    id: ai_model
+    attributes:
+      label: AI model used
+      description: Optional — which model invoked the MCP tools. Useful for behavioral/agent issues.
+      placeholder: "Claude Opus 4.7, Sonnet 4.6, GPT-5, etc."
+  - type: textarea
+    id: prompt
+    attributes:
+      label: Exact prompt
+      description: Optional — the verbatim prompt that triggered the unexpected behavior. Strongly recommended for agent/tool-selection issues.
+  - type: textarea
+    id: tool_calls
+    attributes:
+      label: Tool calls observed
+      description: Optional — which `unifi_*` tools the agent invoked, with arguments. Copy from the agent's tool-call output.
+      render: shell
+  - type: textarea
+    id: raw_tool_output
+    attributes:
+      label: Raw tool output (sanitized)
+      description: Paste the raw response from the relevant tool call. Scrub MACs/IPs/SSIDs/hostnames before posting.
+      render: json
   - type: textarea
     id: expected
     attributes:
@@ -88,7 +171,7 @@ body:
     id: logs
     attributes:
       label: Relevant logs or output
-      description: Paste sanitized logs, tracebacks, tool responses, or command output.
+      description: Paste sanitized logs, tracebacks, or command output.
       render: shell
     validations:
       required: false

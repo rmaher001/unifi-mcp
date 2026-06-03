@@ -359,6 +359,24 @@ in developer workflows; the fourth is automated in the release pipeline.
   `api-actions`, `api-resources`, and `api-streams` phases use a different runner and do
   not require `--server`.
 
+- **api-actions and api-resources use curated subsets, not auto-discovery.** `API_ACTIONS_SAMPLE`
+  in `scripts/live_smoke.py` is a hardcoded list of 6 tools (network clients/devices, protect
+  cameras/lights, access doors/users). New tools are NOT automatically included in
+  `--phase api-actions` coverage. To add a new tool to the api-actions phase, explicitly
+  append it to `API_ACTIONS_SAMPLE`. Do not assume successful MCP-direct smoke implies
+  api-actions coverage.
+
+- **`--phase safe` exercises default args only — it is a regression detector, not full coverage.**
+  The harness calls every tool with its default argument values. New optional parameters added
+  to existing tools are not exercised by the safe phase. After a PR that adds optional parameters,
+  run a targeted second pass: write a short script under `scripts/` that calls the tool with
+  each new non-default value and asserts on the response shape. Delete after verification.
+
+- **HA/shadow mode transient failures are environment issues, not code bugs.** If live smoke
+  fails with "resource temporarily unavailable," "sync in progress," or similar, verify the
+  HA cluster has stabilized before investigating the tool. Retry after 30–60 seconds. Do not
+  block merge on HA transient failures — note them in the PR with a re-run confirmation.
+
 - **Phase 2 baseline is 56 passing approved-ops.** This count was established during Phase 2
   development. A PR that drops the count or introduces new failures requires a documented
   explanation and fix before merge.

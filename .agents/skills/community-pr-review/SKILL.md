@@ -2,14 +2,15 @@
 name: myco:community-pr-review
 description: >-
   Use this skill when reviewing or merging any community PR in unifi-mcp — even if the user
-  just says "take a look at this PR" or "can we merge this." Covers the complete quality gate
-  checklist (f-string logger ban, Ruff lint enforcement, validator registry registration, doc site update ordering),
-  the fork-edit model for trusted contributors, org-fork push limitations, the dual-subagent
-  review pattern, PR body standards, technical API validation (live smoke tests, mutating
-  cycles), DISPATCH_ARG_TRANSLATORS registration for action tools, the unresponsive-first-time-contributor 
-  fork-edit exception for trivial fixes, and the close-and-redirect pattern for unsalvageable PRs. 
-  Apply this skill before approving any externally-authored PR, before running the merge command, 
-  and when auditing recently merged PRs for compliance.
+  just says "take a look at this PR" or "can we merge this." Covers the quality gate checklist
+  (f-string logger ban, Ruff lint, validator registration, doc site update ordering), the
+  fork-edit model for trusted contributors, org-fork push limitations, dual-subagent review,
+  PR body standards, live smoke tests, mutating cycles, the unresponsive-first-time-contributor
+  fork-edit exception, and the close-and-redirect pattern. Also covers community infrastructure
+  setup (.github/ health files, issue routing, bug report template design) and evidence-first
+  bug triage protocol. Apply this skill before approving any externally-authored PR, before
+  running the merge command, when auditing recently merged PRs, and when setting up community
+  engagement infrastructure.
 managed_by: myco
 user-invocable: true
 allowed-tools: Read, Edit, Write, Bash, Grep, Glob
@@ -21,7 +22,7 @@ Community PRs go through a fixed quality checklist before merge. For trusted con
 (level99 has 7+ merged PRs), the maintainer commits fixes directly to the contributor's fork
 branch rather than requesting round-trip revisions — this preserves attribution while eliminating
 latency. An exception exists for first-time contributors who are historically unresponsive: when the fix is
-trivial (ruff format, simple doc change), apply fork-edit rather than request changes. This skill documents 
+trivial (ruff format, simple doc change), apply fork-edit rather than request changes. This skill documents
 the full workflow from first look to merge commit, including technical validation for PRs that touch UniFi API tool implementations.
 
 ## Prerequisites
@@ -131,12 +132,6 @@ make lint
 This invokes Ruff on all modified files and fails on any violations. Do NOT merge a PR with
 lint failures. The project uses Ruff as the canonical linter; violations are hard blockers.
 
-Check the error output for the specific issues:
-- Unused imports
-- Shadowed names
-- Undefined variables
-- Format violations
-
 If the PR introduces lint errors, request fixes via fork-edit (trusted contributors) or a
 review comment (first-time contributors).
 
@@ -144,13 +139,7 @@ review comment (first-time contributors).
 
 **Primary target:** Every `*_manager.py` file the PR touches.
 
-Scan for f-string logger calls:
-
-```bash
-grep -rn 'logger\\\\.\\\\\\\\(debug\\\\\\\\|info\\\\\\\\|warning\\\\\\\\|error\\\\\\\\|critical\\\\\\\\)(f\\\"' $(git diff --name-only origin/main...HEAD)
-```
-
-Replace any hits with `%s`-style lazy formatting:
+Scan for f-string logger calls and replace any hits with `%s`-style lazy formatting:
 
 ```python
 # BLOCKED
@@ -166,7 +155,7 @@ keep appearing. In PR #119, level99's tool layer used `%s` correctly but introdu
 calls in `device_manager.py` (14), `network_manager.py` (7), and `tools/network.py` (2). Always
 check manager files explicitly.
 
-**Implicit concatenation is invisible to grep:** Adjacent string literals (`\\\"foo\\\" \\\"bar\\\"`) cannot
+**Implicit concatenation is invisible to grep:** Adjacent string literals cannot
 be reliably caught by automated scripts. This survived a 481-call automated migration in PR #122
 and was only caught by manual review. Scan manually for this pattern when logger calls span lines.
 
@@ -183,9 +172,9 @@ logger.info("Firewall policy response: %s", json.dumps(response))
 logger.debug("Firewall policy response: %s", json.dumps(response))
 ```
 
-**Why this is a hard ban and not a suggestion:** F-string loggers eagerly evaluate all arguments
-even when the log level is suppressed. On deployments with debug logging disabled, this creates
-unnecessary overhead on every suppressed call.
+**Why this is a hard ban:** F-string loggers eagerly evaluate all arguments even when the log
+level is suppressed. On deployments with debug logging disabled, this creates unnecessary overhead
+on every suppressed call.
 
 ---
 
@@ -211,9 +200,6 @@ published docs stay in sync with the merged code at every point in history.
 
 For PR #126, this gate was explicitly enforced — the PR wasn't merged until doc counts matched.
 
-Verify: does the PR update the doc site entry count and tool listing to match what's being
-merged? If not, either request the update or make it yourself before merging (see Step 2).
-
 ---
 
 ### Gate 4: Shared Pydantic Model Defaults — Blast Radius Check
@@ -230,9 +216,6 @@ class FirewallPolicyBase(BaseModel):
     create_allow_respond: bool = False   # silently overwrites on update
     schedule: dict = {"mode": "ALWAYS"}  # silently overwrites on update
 ```
-
-With this model, `update_firewall_policy({\\\"name\\\": \\\"new\\\"})` would silently inject unwanted field
-values — overwriting whatever the controller currently has, regardless of what the caller specified.
 
 **The rule:** Non-`None` defaults belong only in create-specific subclasses or create-specific
 code paths. Shared base model fields must use `= None`. Any PR that adds non-`None` defaults to
@@ -254,9 +237,6 @@ and mock-based tests do not catch real-world edge cases.
 Run `scripts/live_smoke.py` against a live controller — not a mock — before opening or approving
 the PR.
 
-**Coverage requirement:** All touched tools must pass, and you must also run the full cross-category
-sweep to confirm no lateral regressions across the ~37 tools / 15 categories.
-
 ```bash
 # Run read-only + preview smoke tests against the network server
 # NOTE: The API server is 'unifi-api-server' (not 'unifi-api')
@@ -266,243 +246,96 @@ python scripts/live_smoke.py --server unifi-api-server --phase safe
 python scripts/live_smoke.py --server all --phase safe
 ```
 
-**What "passing" means:**
-- Each tool returns a structurally valid response (correct keys, expected types).
-- No unexpected errors or stack traces in the output.
-- Tools that list resources return at least the expected schema shape even when the controller has no objects of that type.
+**What "passing" means:** each tool returns a structurally valid response; no unexpected errors
+or stack traces; list tools return at least the expected schema shape even with no controller objects.
 
-**Gotcha:** A tool that was already broken before the PR is still your responsibility to flag. Don't
-silently skip known-broken tools — note them explicitly in the PR description so the reviewer knows
-the scope of the damage.
+**Gotcha:** A tool already broken before the PR is still your responsibility to flag. Don't
+silently skip known-broken tools — note them explicitly in the PR description.
 
-**Gotcha:** Mock tests give false confidence. The UniFi controller is quirky — response shapes
-differ between controller versions, and some fields only appear when specific configuration exists.
-A test that passes against a mock may fail silently against a real controller.
+**Gotcha:** Mock tests give false confidence. Response shapes differ between controller versions,
+and some fields only appear when specific configuration exists.
 
-**Gotcha:** HA/shadow mode transient failures are environment issues, not code bugs. If live smoke tests fail with errors like "resource temporarily unavailable" or "sync in progress," verify that the HA cluster has stabilized (check controller logs). Retry the smoke test after 30–60 seconds. This failure mode is transient and does not indicate a problem with the PR code. Do not block merge on HA transient failures; document them in the PR and retry post-merge if necessary.
+**Gotcha:** HA/shadow mode transient failures are environment issues, not code bugs. If live smoke
+tests fail with "resource temporarily unavailable" or "sync in progress," verify the HA cluster has
+stabilized. Retry after 30–60 seconds. Do not block merge on HA transient failures.
 
 ### API Family Boundary Check (V2 vs. Integration)
 
-**Target:** Any PR that adds or modifies tools that expose UniFi API identifiers (resource IDs, object references).
+**Target:** Any PR that adds or modifies tools exposing UniFi API identifiers.
 
-The UniFi API consists of two distinct identifier families: **V2 ObjectIDs** (UUID format, used by newer controllers and network/protect APIs) and **Integration UUIDs** (legacy format, used by older systems and specific handlers). Tools must not mix identifier families in the same resource surface — doing so creates silent data-loss bugs when downstream integrations receive mismatched ID types.
+The UniFi API has two distinct identifier families: **V2 ObjectIDs** (UUID format, newer controllers)
+and **Integration UUIDs** (legacy format). Tools must not mix identifier families in the same resource
+surface — doing so creates silent data-loss bugs when downstream integrations receive mismatched ID types.
 
-**Family boundary rule:** Each tool's input and output surfaces must be consistently rooted in a single identifier family. If a tool exposes a resource's primary ID in V2 ObjectID format, all nested references (e.g., device IDs, policy IDs) must also be V2 ObjectIDs. If rooted in Integration UUID format, all nested references must be Integration UUIDs.
-
-**Validation checklist:**
-
-1. **Identify the tool's primary ID family** — Check what type of ID the tool returns for its primary resource (e.g., if `unifi_get_firewall_policy` returns a policy with ID `"uuid-1234"`, confirm whether that's a V2 ObjectID or Integration UUID)
-2. **Audit nested object references** — Scan all nested objects returned by the tool (e.g., device references, site references, user references) and confirm their ID types match the primary family
-3. **Check create/update input surfaces** — For tools that accept resource IDs as input (e.g., `device_id` in an update tool), verify they accept the same ID family as the primary resource
-4. **Cross-tool consistency** — If multiple tools operate on the same resource type, ensure all of them use the same ID family across read, list, create, and update surfaces
-
-**Example pass:**
-```python
-# CORRECT — consistent V2 ObjectID family
-def unifi_get_firewall_policy(policy_id: str) -> dict:  # V2 ObjectID
-    return {
-        "id": "abc-123",  # V2 ObjectID
-        "device_ids": ["def-456", "ghi-789"],  # V2 ObjectIDs
-    }
-```
-
-**Example fail:**
-```python
-# BLOCKED — mixed identifier families
-def unifi_get_firewall_policy(policy_id: str) -> dict:
-    return {
-        "id": "abc-123",  # V2 ObjectID
-        "device_ids": ["legacy-uuid-1", "legacy-uuid-2"],  # Integration UUIDs — MISMATCH
-    }
-```
+**Family boundary rule:** Each tool's input and output must be consistently rooted in one identifier
+family. All nested references must match the primary resource's ID family.
 
 If the PR introduces mixed families, request fixes before merge. This is a **hard blocker**.
 
 ### Mutating Cycle Tests (Create/Update/Delete PRs)
 
-For any PR that touches create, update, or delete handlers, run a full mutating cycle using
-`--phase approved` — not just the happy path.
+For any PR that touches create, update, or delete handlers, run a full mutating cycle:
 
-**Full cycle:**
 1. **Create** — create the resource via the tool; capture the returned ID.
-2. **Partial update** — update only a subset of fields using the tool.
-3. **Verify field preservation** — read back the resource and confirm fields you did NOT update are unchanged.
+2. **Partial update** — update only a subset of fields.
+3. **Verify field preservation** — read back and confirm fields you did NOT update are unchanged.
 4. **Delete** — remove the resource and confirm it is gone (expect 204 or equivalent).
 
-**Why field preservation matters:** The UniFi API silently drops fields that aren't included in a
-PUT/PATCH body. An update tool that reconstructs the full object from only the changed fields can
-accidentally zero out existing configuration. The verify step is the only reliable way to catch this.
-
-**Example output to embed verbatim in the PR:**
-```
-[CREATE] unifi_create_firewall_policy "test-smoke-policy" → id: abc123 ✓
-[UPDATE] set description="updated", name unchanged → read back: name="test-smoke-policy" ✓
-[DELETE] abc123 → 204 No Content ✓
-```
+**Why field preservation matters:** The UniFi API silently drops fields not included in a
+PUT/PATCH body. The verify step is the only reliable way to catch silent field zeroing.
 
 ### New-Parameter Coverage (Read-Tool PRs that Add Optional Params)
 
-`scripts/live_smoke.py` auto-discovers required arguments and calls every tool
-with **default values only**. For PRs that add new optional parameters with
-non-trivial code paths (filters, shape selectors, projection flags, summary
-toggles), the default-only sweep confirms no regression in the unparameterized
-path but exercises **none** of the new code. A targeted second pass is
-required.
-
-**Procedure:**
-
-1. **Default-only sweep first** — `live_smoke.py --server <server> --phase safe`.
-   This is the regression detector for existing behavior; it is not a validator
-   of new behavior. A passing sweep means "the default path didn't break,"
-   not "the new parameters work."
-
-2. **Targeted in-process pass** — build a small Python script under `scripts/`
-   that imports the tool functions directly, calls each with at least one
-   representative non-default combo per new parameter, and asserts on the
-   response shape. Cover:
-   - Each new param invoked with a non-default value
-   - Echo/diagnostic surfaces (e.g., unknown-token echoes)
-   - Filter composition when multiple new filters can combine
-   - Shape inversion (e.g., `summary=True` vs `summary=False` on the same
-     tool returning different keys)
-
-3. **Delete the script after verification.** It's one-shot validation, not a
-   durable harness — keeping it adds ambient maintenance load without
-   proportional value (per [[feedback_scripts_perceived_rigor]]).
-
-The harness's silence on a new parameter is not evidence of correctness; it
-is evidence of no test.
+`scripts/live_smoke.py` calls every tool with default values only — it exercises none of the new
+code paths. A targeted in-process pass is required: build a small Python script under `scripts/`
+that calls each new parameter with at least one non-default value and asserts on the response shape.
+Delete the script after verification — it's one-shot validation, not a durable harness.
 
 ### Docker Compose Verification (Shape/Description/Default Changes)
 
-For PRs that change tool descriptions, response shapes, parameter defaults, or
-parameter schemas, an in-process script is insufficient. The MCP serialization
-layer, the schema surface visible to MCP clients, and the lazy-discovery
-description text are separate verification surfaces that only the containerized
-server exercises end-to-end.
+For PRs that change tool descriptions, response shapes, or parameter schemas, verify both discovery paths
+a real LLM client uses:
 
-**Bring the container up:**
-
-```bash
-docker compose -f docker/docker-compose.yml up -d --build unifi-network-mcp
-```
-
-Wait for readiness:
-
-```bash
-until curl -sf -o /dev/null \
-    -X POST -H 'Content-Type: application/json' \
-    -H 'Accept: application/json,text/event-stream' \
-    --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"smoke","version":"0"},"capabilities":{}}}' \
-    http://localhost:3000/mcp; do sleep 2; done
-```
-
-Then connect via the streamable-http MCP client and verify **both** discovery
-paths a real LLM client uses:
-
-**1. Pre-loaded path (`unifi_load_tools` then `list_tools`)** — confirms the
-full JSON schema reaches MCP clients: parameter names, types, defaults,
-descriptions. Verify each new param appears in `inputSchema.properties` with
-the correct default.
-
-**2. Default lazy-execute path (`unifi_execute(tool, arguments)`)** — this is
-how most MCP clients call tools by default (no pre-load). Verify:
-   - `unifi_tool_index` returns descriptions that carry the new param
-     semantics in the **description text**. The tool index is
-     `{name, title, description}` only — full JSON schemas do not appear at
-     the lazy-discovery tier. Any new parameter the LLM needs to know about
-     must be mentioned in the description prose; a schema-only update is
-     invisible to lazy-tier callers.
-   - `unifi_execute(tool="...", arguments={...})` passes the new params
-     through the dispatcher and returns the same response shape as the
-     pre-loaded path.
-   - `unifi_execute` **auto-promotes** the called tool into the loaded set —
-     "lazy" means deferred-until-first-use, not ephemeral. After one
-     `unifi_execute` call, the tool appears in `list_tools` for the rest of
-     the session.
-
-Tear down the container after verification:
-
-```bash
-docker compose -f docker/docker-compose.yml down unifi-network-mcp
-```
+1. **Pre-loaded path** (`unifi_load_tools` then `list_tools`) — confirms full JSON schema reaches MCP clients
+2. **Lazy-execute path** (`unifi_execute(tool, arguments)`) — confirms description text carries new param
+   semantics (schemas do not appear at the lazy-discovery tier). `unifi_execute` auto-promotes the tool
+   into the loaded set after first call.
 
 ### "Fully Additive" Claim Audit
 
-When a PR body claims "fully additive" or "all new parameters are optional and
-default to existing behavior", trust but verify by diffing every response shape
-against `main`.
-
-**Procedure:** For each list/detail tool the PR touches, read the `origin/main`
-version of the tool and compare the **literal response dict keys** in the
-default-parameter path against the PR version. Any field that disappears from
-the default path is a breaking change, even if the PR adds an opt-in flag to
-restore it via a non-default parameter.
-
-The remediation options for any such finding:
-
-- **(a)** Gate the narrowing behind an opt-in flag where the default preserves
-  the legacy shape (e.g., `summary=True` defaults to compressed, `summary=False`
-  returns the full pre-PR payload).
-- **(b)** Explicitly call out the narrowing in the PR body as an intentional
-  breaking change, and verify the response-key delta is documented for
-  downstream consumers.
-
-A claim of "fully additive" with a quietly-narrowed default path is not
-acceptable — either gate it or document it.
+When a PR body claims "fully additive," diff every response shape against `main`. Any field that
+disappears from the default path is a breaking change. Gate the narrowing behind an opt-in flag, or
+explicitly document it as an intentional breaking change.
 
 ---
 
 ## Step 1.5b — AI-Bot vs Human Contributor Handling
 
-When a bot (e.g., an AI agent) submits an unsolicited fix to a tool or feature area where in-house
-work is already in progress, apply a different standard than you would for human contributors.
-
 ### AI-Bot PRs: Close in Favor of In-House Work
 
-When an AI-Bot submits a fix to an area with parallel in-house work:
-
-1. **Identify the in-house work** — check issue tracker and PR queue for active or planned work on the same feature/tool
-2. **Assess scope and completeness** — in-house work includes tests, audit, live smoke validation, and full coverage
-3. **Close the bot PR** — use the close-and-redirect pattern (Step 3, Principle #6) with a specific message:
+When an AI-Bot submits a fix to an area with parallel in-house work, close it with:
 
 ```
-Thank you for the contribution. We're already working on this area in-house 
-(see issue #NNN). Our version includes tests, live smoke validation, and 
-full audit coverage. We'll proceed with the in-house approach rather than 
-merging parallel work.
-
-The idea here was solid and might apply elsewhere — we'll keep an eye out 
-for future opportunities.
-
-Closed in favor of issue #NNN.
+Thank you for the contribution. We're already working on this area in-house
+(see issue #NNN). Our version includes tests, live smoke validation, and full
+audit coverage. We'll proceed with the in-house approach rather than merging
+parallel work. Closed in favor of issue #NNN.
 ```
 
-**Key distinction from human contributors:** There is no goodwill concern. A human contributor
-deserves credit and encouragement even if their PR can't be merged. A bot is a tool — its value is
-the idea, not the effort. If the idea is already covered by in-house work, there is no loss.
+There is no goodwill concern — a bot is a tool whose value is the idea, not the effort.
 
 ### Human Contributors: Merge or Encourage Forward
 
-For human PRs in the same situation, treat differently:
 - **If the PR is salvageable,** use the fork-edit model (Step 2) to integrate their work
 - **If the PR is unsalvageable,** use Principle #6 (close-and-redirect) but include meaningful credit
 - Always acknowledge the effort, even if you don't merge the code
-
-The distinction: human contributors build community and relationships; bots submit code without
-building relationships. Invest in humans accordingly.
 
 ---
 
 ## Step 1b — Post Feedback With the Right Review Type
 
 When you find merge blockers in Step 1, submit your GitHub review as **`request-changes`**, not
-as `comment`. This matters for two reasons:
-
-1. **Prevents accidental merge** — GitHub blocks merging a PR that has an unresolved
-   \\\"request changes\\\" review, even if CI is green.
-2. **Signals mandatory work clearly** — the contributor sees their PR requires action, not just
-   feedback.
+as `comment`. This prevents accidental merge and signals mandatory work clearly.
 
 Structure your review body with explicit sections:
 
@@ -515,8 +348,8 @@ Structure your review body with explicit sections:
 - Consider renaming X for consistency with Y
 ```
 
-Hard blockers are items from Gates 1–4. Minor items are suggestions that won't delay merge.
-Use the `comment` review type only when you have zero hard blockers and are leaving suggestions.
+Hard blockers are items from Gates 1–4. Use the `comment` review type only when you have zero
+hard blockers and are leaving suggestions.
 
 ---
 
@@ -529,157 +362,89 @@ fork branch. This is the established model for trusted contributors and for unre
 # Add the contributor's fork as a remote (one-time setup)
 git remote add <contributor> https://github.com/<contributor>/unifi-mcp.git
 
+# Verify and update the remote URL if stale (e.g., fork was recreated since last PR)
+git remote get-url <contributor>
+git remote set-url <contributor> https://github.com/<contributor>/unifi-mcp.git  # if URL is wrong
+
 # Fetch and check out their branch
 git fetch <contributor>
 git checkout -b review/<pr-branch> <contributor>/<pr-branch>
 
-# Make your fixes, then commit with attribution context
-git commit -m \\\"fix: address review gaps from PR #NNN
-
-- Replace f-string loggers in device_manager.py (14 instances)
-- Register new validator in registry
-Co-authored-by: Contributor Name <email>\\\"
-
-# Push back to their fork
+# Make your fixes, commit with attribution context, then push back
 git push <contributor> HEAD:<pr-branch>
 ```
-
-**Why fork-edit instead of review comments:** For contributors with a track record, a review
-comment requesting changes introduces a multi-hour latency (timezone, notification lag, second
-review round). Fixing directly and crediting in the commit message is faster and maintains
-the contributor's name in the merge commit. Use judgment — this model is appropriate when
-the gap is mechanical and the fix is unambiguous.
 
 **Trusted contributor definition:** Level99 qualifies (7+ merged PRs). For first-time or
 low-history contributors, prefer review comments so they learn the patterns.
 
 ### Unresponsive First-Time Contributor — Fork-Edit Exception
 
-When a first-time or low-history contributor is **historically unresponsive** (no response to prior comments within 72+ hours) AND the current PR fix is **trivial and mechanical** (e.g., ruff format, logger replacement, simple doc fix), apply the fork-edit model instead of requesting changes:
-
-1. **Check prior PR history** — Confirm the contributor has ignored feedback in a prior PR without a valid reason (timezone delay, notification failure, etc.)
-2. **Assess fix triviality** — Confirm the gap is mechanical and unambiguous; not a design decision or architectural choice
-3. **Apply fork-edit** — Use the fork-edit workflow above to commit fixes and push back to their branch
-
-**Trade-off:** The fork-edit approach unblocks the pipeline when a contributor is unresponsive, but it does not give the contributor an opportunity to learn the patterns. Use this exception when community momentum is more valuable than teaching opportunity.
-
-**Reference:** PR #288 established this heuristic — a first-time contributor did not respond for 72+ hours despite a ruff format request, but their fix was mechanically correct and unambiguous. Fork-edit unblocked the PR rather than leaving it stalled.
+When a first-time contributor is **historically unresponsive** (72+ hours no response) AND the fix
+is **trivial and mechanical** (ruff format, logger replacement, simple doc fix), apply fork-edit
+instead of requesting changes. **Reference:** PR #288 — contributor non-responsive to ruff format
+request; fork-edit unblocked the PR.
 
 ### Org Forks — Push Limitation
 
-**The fork-edit model only works for personal forks.** Org forks (e.g., `vigrai/unifi-mcp`
-from contributor fgallese in PR #133) block `git push` back to the contributor's branch even
-when \\\"Allow edits from maintainers\\\" is checked on the PR. That checkbox is scoped to personal
-accounts — GitHub does not honor it for org-owned forks.
-
-Decision matrix:
+**The fork-edit model only works for personal forks.** Org forks block `git push` back even when
+"Allow edits from maintainers" is checked — that checkbox is scoped to personal accounts only.
 
 | Fork type | Can push fixes? | Action |
 |-----------|----------------|--------|
-| Personal fork (e.g., `level99/unifi-mcp`) | ✅ Yes | Fork-edit model as described above |
-| Org fork (e.g., `vigrai/unifi-mcp`) | ❌ No | Merge PR as-is, then commit cleanup directly to `main` in a follow-up commit |
-
-When merging an org-fork PR as-is and fixing on main, record what was fixed and why in the
-follow-up commit message so the history is traceable.
+| Personal fork | ✅ Yes | Fork-edit model |
+| Org fork | ❌ No | Merge PR as-is, then commit cleanup to `main` in a follow-up |
 
 ---
 
 ## Step 3 — Verify PR Body Standards
 
-Before merging, confirm the PR body includes:
-
-- **What changed** — which tools or managers were added/modified
-- **Why** — the use case or problem being solved
-- **Testing notes** — how to verify the change works (including live smoke test output for API-touching PRs)
-
-If the PR body is sparse, edit it before merging. The PR body becomes part of the git log
-context and is referenced in future sessions when diagnosing regressions.
+Before merging, confirm the PR body includes: **What changed**, **Why**, and **Testing notes**
+(including live smoke test output for API-touching PRs).
 
 ### API-Touching PR Body: Minimum Requirements
 
-For PRs that modify tools or API handlers, the PR description must include:
-
-**1. Tool summary** — List every tool fixed or added, grouped by category:
-
-```markdown
-### Tools Changed
-- **unifi_get_client_details** — fixed null-check on optional connection field (#138)
-- **unifi_create_firewall_policy** — new tool (#142)
-- **unifi_update_firewall_policy** — new tool (#142)
-```
-
-**2. Embedded live test output** — Paste the raw terminal output (not a prose summary). Reviewers
-need actual values and shapes, not \\\"tests passed.\\\"
-
-```markdown
-<details>
-<summary>Live test output (controller 8.x, 2024-04-01)</summary>
-
-```
-[paste raw output here — do not summarize]
-```
-
-</details>
-```
-
-Reviewers have been burned by \\\"all tests passed\\\" summaries that omit the one tool that returned a
-malformed response. Embed the raw output and let the reviewer decide what matters.
-
-**3. Issue references** — Tag every issue using `#N` format. GitHub autolinks and auto-closes on merge:
-
-```
-Closes #142, #155
-```
-
-**Gotcha:** If you reference an issue in the commit message but not in the PR body, GitHub's
-auto-close only triggers reliably when the PR body contains the `#N` reference. Put it in both.
+1. **Tool summary** — List every tool fixed or added, grouped by category.
+2. **Embedded live test output** — Paste raw terminal output (not a prose summary) in a `<details>` block.
+3. **Issue references** — `#N` format in both the commit message and the PR body for reliable auto-close.
 
 ### When a PR surfaces broader scope (Principle #5)
 
-If reviewing a PR uncovers a pattern that warrants a wider architectural fix (beyond what this
-contributor's PR should carry), open a separate GitHub issue rather than expanding the PR.
-Link the issue in the PR body for context. This keeps the PR focused and creates community
-visibility for the broader discussion.
-
-Use Principle #5 when: **the PR itself is salvageable** but the idea it surfaces is too big
-to carry in this PR.
+If reviewing a PR uncovers a pattern warranting a wider architectural fix, open a separate GitHub
+issue and link it in the PR body. Use Principle #5 when: **the PR itself is salvageable** but the
+idea it surfaces is too big to carry in this PR.
 
 ### When the PR itself is unsalvageable — Close-and-Redirect (Principle #6)
 
-Some PRs are too scattered, unfocused, or structurally misaligned to merge or fix via the
-fork-edit model. When the PR as a whole cannot be salvaged, **close it constructively** rather
-than requesting rework:
+1. **Extract valid proposals** — open a new GitHub issue capturing genuine good ideas
+2. **Implement in-house** — if high-value, plan to implement on `main`
+3. **Credit the contributor** — close with a comment acknowledging them and linking the new issue
 
-1. **Extract valid proposals** — identify any genuinely good ideas in the PR and open a new
-   GitHub issue capturing them. Write the issue clearly enough that a different contributor
-   (or the maintainer) can implement the ideas properly.
-2. **Implement in-house** — if the ideas are high-value, plan to implement them directly on
-   `main` rather than accepting a rework of the original PR.
-3. **Credit the contributor** — close the PR with a comment that acknowledges the contributor
-   for surfacing the problem, links the new issue, and explains why the PR was closed rather
-   than revised. This keeps the community relationship healthy.
-
-**Reference:** PR #142 (riichard) was closed using this pattern. The PR had multiple overlapping
-concerns that couldn't be cleanly separated. Valid proposals were extracted to a GitHub issue;
-the contributor was credited in the close comment.
+**Reference:** PR #142 (riichard) was closed using this pattern.
 
 ### Principle #5 vs. Principle #6 — Decision Matrix
 
 | Situation | Principle | Action |
 |-----------|-----------|--------|
-| PR is good; it just surfaced a bigger idea | **#5** | Keep PR → merge it; open separate issue for the bigger idea |
-| PR has too many concerns to fix cleanly | **#6** | Close PR → extract ideas to issue; implement in-house |
+| PR is good; it just surfaced a bigger idea | **#5** | Keep PR → merge; open separate issue |
+| PR has too many concerns to fix cleanly | **#6** | Close PR → extract ideas; implement in-house |
 | PR has mechanical gaps (logger, registry) | Fork-edit | Fix directly on fork; don't close |
 | Contributor is first-time/low-history | Review comments | Request changes; don't close unless clearly out of scope |
-
-The key question: *can a targeted fix make this PR mergeable?* If yes → Principle #5 or
-fork-edit. If no → Principle #6.
 
 ---
 
 ## Step 4 — Merge
 
-Once all gates pass and any fixes are committed to the fork branch:
+**Gotcha — `mergeStateStatus: BLOCKED`:** GitHub's `mergeable` field and `mergeStateStatus` are
+independent. A PR can show `mergeable: MERGEABLE` while `mergeStateStatus` is still `BLOCKED`
+(e.g., required approvals missing, required status checks pending, branch protection rules active).
+Always confirm both before running the merge command:
+
+```bash
+gh pr view <PR-number> --json mergeStateStatus,reviewDecision,mergeable
+```
+
+`mergeStateStatus: BLOCKED` means the PR cannot be merged regardless of `mergeable`. Resolve
+the blocking condition (get missing approvals, wait for pending checks) before proceeding.
 
 ```bash
 # Merge with a merge commit (not squash) to preserve contributor commits
@@ -693,24 +458,120 @@ in history. Squash only if the branch history is genuinely noisy.
 
 ## Post-Merge Audit Pattern
 
-If a PR was merged without running this checklist (e.g., merged by a contributor directly),
-run a retroactive audit:
+If a PR was merged without running this checklist, run a retroactive audit:
 
 ```bash
-# Find files changed in the merge commit
 git diff --name-only <merge-commit>^1 <merge-commit>
 ```
 
 Then run Gates 1–4 against those files. If gaps are found, open a follow-up PR immediately.
-Don't let an unreviewed merge sit — the pattern compounds. PR #122 was audited retroactively
-using this exact approach and a fix PR was opened the same session.
+PR #122 was audited retroactively using this exact approach.
+
+---
+
+## Community Infrastructure Setup
+
+Set up `.github/` infrastructure when the project goes public or when a new issue category
+emerges. This is the upstream foundation that makes PR triage scalable.
+
+The standard layout is: `.github/ISSUE_TEMPLATE/` (structured forms), `.github/config.yml`
+(routing rules), `CONTRIBUTING.md` (contribution guidelines including the evidence-first doctrine),
+and `SUPPORT.md` (support channels: Discussions for questions, tracker for confirmed bugs only).
+
+### config.yml Routing
+
+Route sensitive and support traffic away from Issues before it arrives:
+
+```yaml
+# .github/config.yml
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability
+    url: https://github.com/ORG/REPO/security/advisories/new
+    about: Report a security vulnerability via GitHub Security Advisories
+  - name: Usage Question / Support
+    url: https://github.com/ORG/REPO/discussions
+    about: Ask questions and get help in GitHub Discussions
+```
+
+`blank_issues_enabled: false` forces all issues through form templates, preventing unstructured
+filings. Security reports go to Advisories (private by default); support questions go to Discussions
+so the issue tracker stays actionable.
+
+---
+
+## Bug Report Template Design
+
+The bug report form collects hardware-specific context that prevents 3-comment follow-up cycles.
+Because unifi-mcp behavior varies by controller firmware, hardware SKU, and install method,
+collecting this context at first filing is essential.
+
+### Required Fields (never make optional)
+
+| Field | Type | Why required |
+|-------|------|--------------|
+| Controller hardware | Dropdown | API behavior varies by hardware family |
+| UniFi OS version | Text | Firmware version determines which API fields are present |
+| Install method | Text | Determines whether aiounifi version is pinned vs. flexible |
+| Client OS | Text | Needed for install-method-specific issues |
+
+**Controller hardware dropdown options:** UDM Pro, UDM Pro Max, UDM SE, UDM (base), UDR / UDR7,
+UCG Max / UCG Ultra / UCG Fiber, Cloud Key Gen2 / Gen2+, Self-hosted (Linux), Self-hosted (Docker),
+UniFi-hosted (Site Manager / Cloud Console), Other, N/A — not an MCP server bug.
+
+**Per-application version fields** (Network, Protect, Access): label as "Required if reporting a
+bug in this app." GitHub Issue Forms don't support conditional `required` — enforce via description text.
+
+### AI-Agent Context Fields (optional — four separate fields)
+
+Because unifi-mcp is used by AI agents, many reported bugs are agent misuse rather than server bugs.
+Use four separate optional fields: AI model used, exact prompt, tool calls observed (render: shell),
+and raw tool output sanitized (render: json). Optional to avoid friction-stalling non-AI bugs.
+
+**Template impact:** Issue #297 (before template): "MacOS, Claude Code Desktop via uvx" with zero
+controller info — three follow-up comments without reproduction. Issue #298 (after template, commit
+`b8e8054`): hardware ("UDM Pro") and raw API output on first filing — fix confirmed within 5 minutes.
+
+---
+
+## Evidence-First Issue Triage
+
+Do not implement code changes based on user reports without first establishing reproduction evidence.
+UniFi API behavior varies by firmware — a defensive patch without understanding the variance is
+either unnecessary or treats a symptom rather than the root cause.
+
+### Triage Checklist (execute in order)
+
+1. **Check template completeness** — Did the reporter provide controller hardware, OS version, and
+   install method? If not, request those fields before proceeding.
+
+2. **Establish reproduction** — Run a live smoke test against a real controller, or request raw API
+   output from the reporter. The live-smoke Docker environment is the reference reproduction point.
+
+3. **Inspect raw API payloads** — Before any code change, get the raw JSON from the relevant
+   controller endpoint. The missing field may be present under a different name, absent only in older
+   firmware, or already handled by the codebase.
+
+4. **Rule out alternative explanations:**
+   - Version drift (plugin users have pinned aiounifi; source installs may not)
+   - Cached vs. live data: the stat/sta endpoint is live-polled; the rest/user snapshot is updated
+     infrequently — timing determines what you see
+   - API contract differences between hardware families at the same OS version
+
+5. **Confirm hypothesis before coding** — Only after steps 1–4 confirm the bug is real and understood
+   should you begin implementation.
+
+**Gotcha: AI-generated analysis without reproduction** — If an AI assistant proposes a code fix for
+a bug report, treat that proposal as a starting hypothesis — not a confirmed diagnosis. Issue #297
+showed this pattern: initial AI analysis proposed a code change without confirmed reproduction; the
+developer correctly pushed back. Always verify with live reproduction before merging any AI-proposed fix.
 
 ---
 
 ## Quick Reference — Gate Summary
 
 | Gate | Blocker level | Where to look | Common miss |
-|------|--------------|---------------|------------|
+|------|--------------|---------------|-------------|
 | First-time CI auth (Step 0b) | Blocking | GitHub Actions tab | Manual workflow approval not triggered |
 | PR type (Gate 0) | Routing gate | PR description + linked issue | Applying feature-addition checklist to a governance/refactor PR |
 | Ruff lint (Gate 1A) | Hard block | Output of `make lint` | Lint violations not run or not fixed |
@@ -720,6 +581,8 @@ using this exact approach and a fix PR was opened the same session.
 | Shared pydantic model defaults (Gate 4) | Hard block | `<Domain>Base` model in `unifi-core` | Non-None defaults on shared base model fields silently overwrite update-tool fields |
 | API family boundary (Step 1.5) | Hard block | Tool ID types and nested object references | V2 ObjectID and Integration UUID mixed in same tool surface |
 | HA/shadow mode transience (Step 1.5) | Environment issue (not code) | Live smoke test error messages | Blocking merge on HA sync timeouts; retry after stabilization |
+| mergeStateStatus:BLOCKED (Step 4) | Blocking | `gh pr view --json mergeStateStatus,reviewDecision` | Merging when protection rules block despite mergeable:MERGEABLE |
 | AI-Bot vs human (Step 1.5b) | Precedent gate | Issue tracker + PR scope | Merging bot PRs with parallel in-house work; missing credit for human contributors |
 | Live smoke tests (Step 1.5) | Validation requirement | `scripts/live_smoke.py` output | Approval without actual live controller tests; mock-only validation |
 | Mutation cycles (Step 1.5) | Field preservation blocker | Create → update → verify → delete cycle | Update tools that reconstruct objects silently zero fields |
+| Issue triage (Triage section) | Evidence gate | Raw API payload from reporter | Implementing fixes without confirmed reproduction or raw payload inspection |

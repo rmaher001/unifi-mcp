@@ -123,7 +123,7 @@ from unifi_core.network.models.dns_record import DnsRecord, MUTABLE_FIELDS
 def get_tools() -> list[Tool]:
     _mutable = {k: v for k, v in DnsRecord.model_json_schema()["properties"].items() if k in MUTABLE_FIELDS}
     return [
-        Tool(name="network_dns_record_list", description="List DNS records.", 
+        Tool(name="network_dns_record_list", description="List DNS records.",
              inputSchema={"type": "object", "properties": {}},
              annotations=ToolAnnotations(readOnlyHint=True, idempotentHint=True)),
         Tool(name="network_dns_record_update", description="Update DNS record.",
@@ -209,37 +209,39 @@ from unifi_api.types._base import type_registry
 type_registry.register_tool_type("unifi_list_clients", Client)
 ```
 
-### Procedure B.5 — Protect List Tools: kind=DETAIL Wrapper Pattern
+### Procedure B.5 — Protect List Tools: Two Valid Patterns
 
-Certain Protect resources return heterogeneous shapes (list vs. single-dict) depending on firmware version or feature flags. The API must normalize these to a consistent contract.
+Protect list tools have two valid patterns depending on whether the manager returns a
+homogeneous list or a variable-shape envelope:
 
-**Pattern:** Wrap the raw response in a `kind=DETAIL` type that coerces both list and dict shapes to a unified contract:
+**Pattern 1 — `kind=list` with `_coerce_list_result` normalization** (recognition tools):
+Used for `protect_list_known_faces` and `protect_list_known_license_plates`. These tools
+return a single-key dict envelope (e.g., `{"items": [...]}`) from the manager. The API
+routes layer (`apps/api/src/unifi_api/routes/actions.py`) automatically calls
+`_coerce_list_result()` for any tool with `kind="list"` — it unwraps a single-key dict
+into a bare list. Implement these tools as standard `kind=list` types; do not manually
+unwrap the envelope in the type or tool layer.
 
+**Pattern 2 — `kind=DETAIL` wrapper** (alarm rules and other variable-shape resources):
+Used for resources that return either a bare list or a `{items, count}` dict depending on
+firmware version. The API type's `from_manager_output` accepts both shapes and normalizes:
 ```python
-# apps/api/src/unifi_api/types/protect/alarm_rule.py
 @strawberry.type
 class AlarmRuleListType(UniFiType):
-    kind: str = "DETAIL"  # coerce list/dict to unified shape
-    id: str
-    name: str
-    # ... other fields
-    
+    kind: str = "DETAIL"
+    # fields...
     @classmethod
-    def from_manager_object(cls, obj):
-        # Handle both list and dict responses
-        if isinstance(obj.raw, list):
-            # Coerce list to first element or aggregated shape
-            data = obj.raw[0] if obj.raw else {}
+    def from_manager_output(cls, raw):
+        if isinstance(raw, list):
+            data = raw[0] if raw else {}
         else:
-            data = obj.raw
-        return cls(
-            id=data.get("_id"),
-            name=data.get("name"),
-            # ...
-        )
+            data = raw  # {items: [...], count: N}
+        return cls(...)
 ```
 
-This prevents tool output contract drift when Protect firmware varies or toggles optional response wrapping.
+**Choosing the pattern:** Use `kind=list` + `_coerce_list_result` when the manager returns
+a consistent single-key envelope. Use `kind=DETAIL` wrapper when the firmware may return
+bare list or dict depending on version. Document the firmware versions tested.
 
 ### Procedure C: Mutation Registration
 
@@ -265,7 +267,7 @@ from unifi_api.services.pagination import Cursor, paginate
 
 cursor = Cursor.decode(cursor_param) if cursor_param else None
 items = await manager.get_clients()
-page, next_cursor = paginate(items, limit=50, cursor=cursor, 
+page, next_cursor = paginate(items, limit=50, cursor=cursor,
                             key_fn=lambda i: (i.raw.get("last_seen", 0), i.raw.get("_id", "")))
 return {"items": [...], "next_cursor": next_cursor.encode() if next_cursor else None}
 ```
@@ -350,4 +352,8 @@ Manager class: `{Resource}Manager`. Factory: `get_{resource}_manager` with `@lru
 
 **Pass-through test pattern:** For tools that pass raw manager output to API without transformation, validate that the shape is compatible with Strawberry type expectations. Use snapshot tests or schema-compliance tests to catch shape drift early.
 
-**Protect list heterogeneity:** Alarm rules and other Protect resources may return list or dict depending on firmware. Use the `kind=DETAIL` wrapper pattern to normalize the shape in the API layer. Document the firmware versions tested and the heterogeneous behavior observed.
+**`_coerce_list_result` for kind=list action tools:** `apps/api/src/unifi_api/routes/actions.py` automatically calls `_coerce_list_result()` for any action tool whose type has `kind="list"`. It unwraps single-key dict envelopes (e.g., `{"items": [...]}`) to a bare list; bare lists pass through unchanged. Protect recognition tools (`protect_list_known_faces`, `protect_list_known_license_plates`) rely on this. If your new list tool's manager returns a multi-key dict, `_coerce_list_result` will raise — ensure manager output is either a bare list or a single-key envelope dict.
+
+**api-actions phase uses a curated 6-tool sample:** `API_ACTIONS_SAMPLE` in `scripts/live_smoke.py` is hardcoded to 6 tools (network clients/devices, protect cameras/lights, access doors/users). New tools are NOT automatically included in `--phase api-actions` coverage. To add api-actions smoke coverage for a new tool, explicitly append it to `API_ACTIONS_SAMPLE` in `scripts/live_smoke.py`.
+
+**Tool description vs. Pydantic Field description:** Tool `description=` field conveys the tool's purpose to the LLM. Pydantic `Field(description=...)` conveys field semantics. Keep these distinct — do not copy-paste the tool description into field descriptions or vice versa.

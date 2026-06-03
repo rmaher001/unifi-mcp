@@ -1,18 +1,5 @@
 version: 3
 config_version: 9
-embedding:
-  provider: ollama
-  model: bge-m3:latest
-capture:
-  transcript_paths: []
-  plan_dirs:
-    - docs/superpowers/plans/
-    - docs/superpowers/specs/
-    - docs/plans
-  ignore_plan_dirs_in_git: true
-  artifact_extensions:
-    - .md
-  buffer_max_events: 500
 release_provenance:
   enabled: true
   production_refs:
@@ -46,66 +33,6 @@ release_provenance:
       tag_pattern: refs/tags/access/v*
     - path_glob: apps/api/
       tag_pattern: refs/tags/api/v*
-agent:
-  summary_batch_interval: 10
-  scheduled_tasks_enabled: true
-  event_tasks_enabled: true
-  cold_project_threshold_days: 14
-  provider:
-    type: anthropic
-  harness: claude-sdk
-  tasks:
-    skill-generate:
-      provider:
-        type: anthropic
-        model: claude-sonnet-4-6
-        reasoning_map:
-          low: claude-haiku-4-5-20251001
-          default: claude-sonnet-4-6
-          high: claude-opus-4-6
-      harness: claude-sdk
-      phases:
-        validate:
-          maxTurns: 25
-      schedule:
-        enabled: true
-    skill-evolve:
-      provider:
-        type: anthropic
-        model: claude-sonnet-4-6
-        reasoning_map:
-          low: claude-haiku-4-5-20251001
-          default: claude-sonnet-4-6
-          high: claude-opus-4-6
-      harness: claude-sdk
-      schedule:
-        enabled: true
-    canopy-describe:
-      provider:
-        type: lmstudio
-        base_url: http://10.29.13.49:1234
-        model: openai/gpt-oss-20b
-        reasoning_map:
-          low: openai/gpt-oss-20b
-          default: openai/gpt-oss-20b
-      harness: openai-agents
-      schedule:
-        enabled: true
-skills:
-  confidence_threshold: 0.7
-  usage_stale_days: 30
-notifications:
-  enabled: true
-  system_notifications: true
-  default_mode: summary
-  domains:
-    mycelium:
-      enabled: false
-    sessions:
-      enabled: false
-    settings:
-      enabled: true
-      mode: banner
 cortex:
   enabled: true
   instructions:

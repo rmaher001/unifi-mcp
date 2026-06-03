@@ -161,16 +161,16 @@ Create a test file to validate field symmetry for this domain.
            "field_a", "field_b", "field_c"
            # ... enumerate from list_<domain> output
        }
-       
+
        # Get update model fields
        update_fields = set(Update<Domain>.model_fields.keys())
-       
+
        # Check symmetry (allowing for known exceptions)
        missing_in_update = list_fields - update_fields - {
            # Add read-only fields here, e.g.:
            # "id", "created_at", "computed_field"
        }
-       
+
        assert not missing_in_update, f"Fields in list but not update: {missing_in_update}"
    ```
 
@@ -255,7 +255,7 @@ your new model handles.
 | File | Purpose |
 |------|---------|
 | `packages/unifi-core/src/unifi_core/network/models/acl.py` | ACL model example |
-| `apps/network/src/unifi_network_mcp/managers/acl_manager.py` | ACL manager example (field validation pattern) |
+| `packages/unifi-core/src/unifi_core/network/managers/acl_manager.py` | ACL manager example (field validation pattern) |
 | `apps/api/tests/unit/test_cross_layer_symmetry.py` | MCP↔API drift gate (REGISTERED_PAIRS) |
 | `AGENTS.md` | Governance rule (field-symmetry domain rollout) |
 | `tests/unit/test_*_field_symmetry.py` | Domain-specific symmetry test examples |

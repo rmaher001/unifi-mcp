@@ -349,6 +349,68 @@ class EventManager:
             fields["detected_thumbnail_id"] = detected_thumbnail_id
         return fields
 
+    def _license_plate_recognition_fields(self, event: Event) -> dict[str, Any]:
+        """Extract recognized license-plate identity metadata from detected thumbnails.
+
+        Mirrors :meth:`_face_recognition_fields` but targets LPR detections. The
+        Protect API delivers the recognized plate text on the ``vehicle`` (or
+        occasionally ``licensePlate``) thumbnail inside ``event.metadata.detected_thumbnails``;
+        when present, it appears as ``thumbnail.name`` and/or
+        ``thumbnail.group.matched_name``. The plate's group UUID and the
+        recognition confidence are on the same ``group`` sub-object.
+        """
+        thumbnails = self._detected_thumbnails(event)
+        if not thumbnails:
+            return {}
+
+        smart_detect_types = set(_enum_values(_get_any(event, "smart_detect_types", "smartDetectTypes")))
+        if "licensePlate" not in smart_detect_types:
+            return {}
+
+        def _plate_text(thumb: Any) -> str | None:
+            group = _get(thumb, "group")
+            return _get_any(group, "matched_name", "matchedName", "name") or _get_any(
+                thumb, "matched_name", "matchedName", "name"
+            )
+
+        # On LPR events the carrying thumbnail.type is usually "vehicle", but
+        # accept "licensePlate" defensively; either way it must have a plate
+        # string to be considered a recognition payload.
+        candidates = [
+            thumb for thumb in thumbnails if _get(thumb, "type") in ("vehicle", "licensePlate") and _plate_text(thumb)
+        ]
+        if not candidates:
+            return {}
+
+        def _score(thumb: Any) -> tuple[int, int]:
+            group = _get(thumb, "group")
+            confidence = _coerce_int(
+                _get_any(group, "confidence", "matched_group_confidence", "matchedGroupConfidence")
+                or _get_any(thumb, "confidence", "matched_group_confidence", "matchedGroupConfidence")
+            )
+            group_id = _get_any(group, "id", "group_id", "groupId") or _get_any(thumb, "group_id", "groupId")
+            return (1 if group_id else 0, confidence or 0)
+
+        thumbnail = max(candidates, key=_score)
+        group = _get(thumbnail, "group")
+        plate_text = _plate_text(thumbnail)
+        plate_group_id = _stringify(
+            _get_any(group, "id", "group_id", "groupId") or _get_any(thumbnail, "group_id", "groupId")
+        )
+        plate_confidence = _coerce_int(
+            _get_any(group, "confidence", "matched_group_confidence", "matchedGroupConfidence")
+            or _get_any(thumbnail, "confidence", "matched_group_confidence", "matchedGroupConfidence")
+        )
+
+        fields: dict[str, Any] = {}
+        if plate_text:
+            fields["recognized_plate_text"] = str(plate_text)
+        if plate_group_id:
+            fields["recognized_plate_group_id"] = plate_group_id
+        if plate_confidence is not None:
+            fields["recognized_plate_confidence"] = plate_confidence
+        return fields
+
     async def _lookup_event_recognition_fields(self, event: Event) -> dict[str, Any]:
         """Fetch the same face event from the list/search path when detail drops group metadata."""
         if "face" not in set(_enum_values(_get(event, "smart_detect_types"))):
@@ -374,6 +436,36 @@ class EventManager:
         for candidate in events:
             if candidate.id == event.id:
                 return self._face_recognition_fields(candidate)
+        return {}
+
+    async def _lookup_event_plate_recognition_fields(self, event: Event) -> dict[str, Any]:
+        """Fetch the same LPR event from the list/search path when the detail
+        endpoint drops the plate group metadata (it keeps the plate text and
+        confidence but not the stable group id). Mirrors
+        :meth:`_lookup_event_recognition_fields` for license plates."""
+        if "licensePlate" not in set(_enum_values(_get(event, "smart_detect_types"))):
+            return {}
+
+        kwargs: dict[str, Any] = {
+            "limit": 100,
+            "sorting": "desc",
+            "types": [EventType.SMART_DETECT, EventType.SMART_DETECT_LINE],
+            "smart_detect_types": [SmartDetectObjectType.LICENSE_PLATE],
+        }
+        if event.start:
+            kwargs["start"] = event.start - timedelta(seconds=5)
+            end = event.end or event.start
+            kwargs["end"] = end + timedelta(minutes=1)
+
+        try:
+            events: list[Event] = await self._cm.client.get_events(**kwargs)
+        except Exception:
+            logger.debug("[event-mgr] Unable to backfill plate metadata for event %s", event.id, exc_info=True)
+            return {}
+
+        for candidate in events:
+            if candidate.id == event.id:
+                return self._license_plate_recognition_fields(candidate)
         return {}
 
     async def _known_face_names_by_id(self) -> dict[str, str]:
@@ -437,6 +529,7 @@ class EventManager:
             "smart_detect_types": _enum_values(event.smart_detect_types),
         }
         result.update(self._face_recognition_fields(event))
+        result.update(self._license_plate_recognition_fields(event))
         if not compact:
             result["thumbnail_id"] = event.thumbnail_id
             result["category"] = event.category
@@ -489,12 +582,10 @@ class EventManager:
             "score": _get(raw, "score"),
             "smart_detect_types": sdt,
         }
-        # Existing face convenience extractor (relies on _get/_get_any which
-        # handle both Event objects and dicts) keeps working untouched.
-        # Note: PR-4 introduces _license_plate_recognition_fields on a separate
-        # branch. This PR does not depend on PR-4; when both merge an integration
-        # commit will add the parallel call here.
+        # Face + license-plate convenience extractors (rely on _get/_get_any,
+        # which read both parsed Event objects and raw camelCase dicts).
         result.update(self._face_recognition_fields(raw))
+        result.update(self._license_plate_recognition_fields(raw))
 
         if not compact:
             result["thumbnail_id"] = _get(raw, "thumbnail") or _get(raw, "thumbnail_id")
@@ -659,6 +750,8 @@ class EventManager:
         result = self._event_to_dict(event)
         if not result.get("recognized_person_id") and not result.get("recognized_person_name"):
             result.update(await self._lookup_event_recognition_fields(event))
+        if not result.get("recognized_plate_group_id"):
+            result.update(await self._lookup_event_plate_recognition_fields(event))
         await self._apply_known_face_names([result])
         return result
 

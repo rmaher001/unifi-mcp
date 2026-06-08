@@ -153,6 +153,79 @@ async def test_protect_smart_detections_list(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_protect_event_detail_surfaces_plate_identity(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNIFI_API_DB_KEY", "k")
+    app, key, cid = await bootstrap(tmp_path, product="protect")
+    stub_managers(
+        monkeypatch,
+        {
+            ("protect", "event_manager", "list_events"): [
+                {
+                    "id": "evt1",
+                    "type": "smartDetectZone",
+                    "camera_id": "cam1",
+                    "start": 1000,
+                    "recognized_plate_text": "ABC123",
+                    "recognized_plate_group_id": "plate-group-1",
+                    "recognized_plate_confidence": 88,
+                },
+            ],
+        },
+    )
+    body = await graphql_query(
+        app,
+        key,
+        f'''{{
+        protect {{ event(controller: "{cid}", id: "evt1") {{
+            id recognizedPlateText recognizedPlateGroupId recognizedPlateConfidence
+        }} }}
+    }}''',
+    )
+    assert body.get("errors") is None, body
+    event = body["data"]["protect"]["event"]
+    assert event["recognizedPlateText"] == "ABC123"
+    assert event["recognizedPlateGroupId"] == "plate-group-1"
+    assert event["recognizedPlateConfidence"] == 88
+
+
+@pytest.mark.asyncio
+async def test_protect_smart_detections_surface_plate_identity(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNIFI_API_DB_KEY", "k")
+    app, key, cid = await bootstrap(tmp_path, product="protect")
+    stub_managers(
+        monkeypatch,
+        {
+            ("protect", "event_manager", "list_smart_detections"): [
+                {
+                    "id": "sd1",
+                    "type": "vehicle",
+                    "camera_id": "cam1",
+                    "start": 1000,
+                    "score": 90,
+                    "recognized_plate_text": "ABC123",
+                    "recognized_plate_group_id": "plate-group-1",
+                    "recognized_plate_confidence": 88,
+                },
+            ],
+        },
+    )
+    body = await graphql_query(
+        app,
+        key,
+        f'''{{
+        protect {{ smartDetections(controller: "{cid}", limit: 10) {{
+            items {{ id recognizedPlateText recognizedPlateGroupId recognizedPlateConfidence }}
+        }} }}
+    }}''',
+    )
+    assert body.get("errors") is None, body
+    item = body["data"]["protect"]["smartDetections"]["items"][0]
+    assert item["recognizedPlateText"] == "ABC123"
+    assert item["recognizedPlateGroupId"] == "plate-group-1"
+    assert item["recognizedPlateConfidence"] == 88
+
+
+@pytest.mark.asyncio
 async def test_protect_alarm_status(tmp_path, monkeypatch):
     monkeypatch.setenv("UNIFI_API_DB_KEY", "k")
     app, key, cid = await bootstrap(tmp_path, product="protect")

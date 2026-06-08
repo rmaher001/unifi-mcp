@@ -49,6 +49,21 @@ class Event(BaseModel):
     recognized_person_confidence: Optional[int] = Field(
         default=None, description="Known Face match confidence when present", json_schema_extra={"mutable": False}
     )
+    recognized_plate_text: Optional[str] = Field(
+        default=None,
+        description="Recognized license-plate text (e.g. 'ABC123') when LPR fires on a vehicle event",
+        json_schema_extra={"mutable": False},
+    )
+    recognized_plate_group_id: Optional[str] = Field(
+        default=None,
+        description="Recognized license-plate group UUID (a stable ID per recognized plate) when present",
+        json_schema_extra={"mutable": False},
+    )
+    recognized_plate_confidence: Optional[int] = Field(
+        default=None,
+        description="License-plate match confidence (0-100) when LPR fires",
+        json_schema_extra={"mutable": False},
+    )
     metadata: Optional[dict[str, Any]] = Field(
         default=None,
         description=(
@@ -101,6 +116,21 @@ class SmartDetection(BaseModel):
     )
     recognized_person_confidence: Optional[int] = Field(
         default=None, description="Known Face match confidence when present", json_schema_extra={"mutable": False}
+    )
+    recognized_plate_text: Optional[str] = Field(
+        default=None,
+        description="Recognized license-plate text (e.g. 'ABC123') when LPR fires on a vehicle event",
+        json_schema_extra={"mutable": False},
+    )
+    recognized_plate_group_id: Optional[str] = Field(
+        default=None,
+        description="Recognized license-plate group UUID (a stable ID per recognized plate) when present",
+        json_schema_extra={"mutable": False},
+    )
+    recognized_plate_confidence: Optional[int] = Field(
+        default=None,
+        description="License-plate match confidence (0-100) when LPR fires",
+        json_schema_extra={"mutable": False},
     )
     metadata: Optional[dict[str, Any]] = Field(
         default=None,
@@ -214,6 +244,9 @@ def from_controller(raw: Any) -> Event:
         recognized_person_id=_get(raw, "recognized_person_id"),
         recognized_person_name=_get(raw, "recognized_person_name"),
         recognized_person_confidence=_get(raw, "recognized_person_confidence"),
+        recognized_plate_text=_get(raw, "recognized_plate_text"),
+        recognized_plate_group_id=_get(raw, "recognized_plate_group_id"),
+        recognized_plate_confidence=_get(raw, "recognized_plate_confidence"),
         metadata=_get(raw, "metadata"),
         detected_thumbnail_id=_get_any(raw, "detected_thumbnail_id", "detectedThumbnailId"),
     )
@@ -240,6 +273,9 @@ def smart_detection_from_controller(raw: Any) -> SmartDetection:
         recognized_person_id=_get(raw, "recognized_person_id"),
         recognized_person_name=_get(raw, "recognized_person_name"),
         recognized_person_confidence=_get(raw, "recognized_person_confidence"),
+        recognized_plate_text=_get(raw, "recognized_plate_text"),
+        recognized_plate_group_id=_get(raw, "recognized_plate_group_id"),
+        recognized_plate_confidence=_get(raw, "recognized_plate_confidence"),
         metadata=_get(raw, "metadata"),
         detected_thumbnail_id=_get_any(raw, "detected_thumbnail_id", "detectedThumbnailId"),
     )

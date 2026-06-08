@@ -8,7 +8,7 @@ dependencies = [
     # API server registers controllers across all three products, so it
     # needs every product extra. unifi-core's optional extras pull in
     # aiounifi / uiprotect / py-unifi-access transparently.
-    "unifi-core[network,protect,access]>=0.3.13,<0.4",
+    "unifi-core[network,protect,access]>=0.3.14,<0.4",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.48.0",
     "sqlalchemy[asyncio]>=2.0.49",

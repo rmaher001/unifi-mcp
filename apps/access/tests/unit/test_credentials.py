@@ -9,6 +9,7 @@ import pytest
 from unifi_core.access.managers.connection_manager import AccessConnectionManager
 from unifi_core.access.managers.credential_manager import CredentialManager
 from unifi_core.exceptions import UniFiConnectionError
+from unifi_core.redaction import REDACTED
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -166,3 +167,84 @@ class TestApplyRevokeCredential:
     async def test_apply_revoke_no_proxy(self, cred_mgr_none):
         with pytest.raises(UniFiConnectionError, match="No proxy session"):
             await cred_mgr_none.apply_revoke_credential("cred-1")
+
+
+# ---------------------------------------------------------------------------
+# MCP tool response redaction
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialToolRedaction:
+    @pytest.mark.asyncio
+    async def test_create_credential_preview_redacts_token_and_pin(self):
+        with patch("unifi_access_mcp.tools.credentials.credential_manager") as mock_mgr:
+            mock_mgr.create_credential = AsyncMock(
+                return_value={
+                    "proposed_changes": {
+                        "action": "create",
+                        "type": "pin",
+                        "user_id": "user1",
+                        "token": "nfc-token",
+                        "pin_code": "123456",
+                    }
+                }
+            )
+
+            from unifi_access_mcp.tools.credentials import access_create_credential
+
+            result = await access_create_credential(
+                "pin",
+                {"user_id": "user1", "token": "nfc-token", "pin_code": "123456"},
+                confirm=False,
+            )
+
+        assert result["preview"]["will_create"]["token"] == REDACTED
+        assert result["preview"]["will_create"]["pin_code"] == REDACTED
+
+    @pytest.mark.asyncio
+    async def test_create_credential_confirm_redacts_result_token_and_pin(self):
+        with patch("unifi_access_mcp.tools.credentials.credential_manager") as mock_mgr:
+            mock_mgr.apply_create_credential = AsyncMock(
+                return_value={"result": "success", "token": "nfc-token", "pin_code": "123456"}
+            )
+
+            from unifi_access_mcp.tools.credentials import access_create_credential
+
+            result = await access_create_credential(
+                "pin",
+                {"user_id": "user1", "token": "nfc-token", "pin_code": "123456"},
+                confirm=True,
+            )
+
+        assert result["data"]["token"] == REDACTED
+        assert result["data"]["pin_code"] == REDACTED
+
+    @pytest.mark.asyncio
+    async def test_get_credential_redacts_by_default_and_allows_opt_out(self):
+        secret = {"id": "cred-1", "type": "nfc", "user_id": "u1", "token": "AABBCCDD", "pin_code": "123456"}
+        with patch("unifi_access_mcp.tools.credentials.credential_manager") as mock_mgr:
+            mock_mgr.get_credential = AsyncMock(return_value=secret)
+
+            from unifi_access_mcp.tools.credentials import access_get_credential
+
+            default = await access_get_credential("cred-1")
+            raw = await access_get_credential("cred-1", include_sensitive=True)
+
+        assert default["data"]["token"] == REDACTED
+        assert default["data"]["pin_code"] == REDACTED
+        assert raw["data"]["token"] == "AABBCCDD"
+        assert raw["data"]["pin_code"] == "123456"
+
+    @pytest.mark.asyncio
+    async def test_list_credentials_redacts_token_and_pin_by_default(self):
+        secret = {"id": "cred-1", "type": "nfc", "user_id": "u1", "token": "AABBCCDD", "pin_code": "123456"}
+        with patch("unifi_access_mcp.tools.credentials.credential_manager") as mock_mgr:
+            mock_mgr.list_credentials = AsyncMock(return_value=[secret])
+
+            from unifi_access_mcp.tools.credentials import access_list_credentials
+
+            result = await access_list_credentials()
+
+        cred = result["data"]["credentials"][0]
+        assert cred["token"] == REDACTED
+        assert cred["pin_code"] == REDACTED

@@ -124,6 +124,21 @@ class TestFromController:
         assert c.type == "mobile"
         assert c.user_id == "user-99"
 
+    def test_credential_from_controller_carries_secrets_verbatim(self) -> None:
+        # The domain model is lossless: redaction is a response-boundary
+        # concern (MCP tool / serializer / GraphQL type), not the model's job.
+        model = from_controller(
+            {
+                "id": "cred1",
+                "type": "nfc",
+                "token": "nfc-token",
+                "pin_code": "123456",
+            }
+        )
+
+        assert model.token == "nfc-token"
+        assert model.pin_code == "123456"
+
 
 class TestToControllerCreate:
     def test_nfc_emits_type_user_id_token(self) -> None:
@@ -131,6 +146,14 @@ class TestToControllerCreate:
         payload = to_controller_create(model)
         assert payload["credential_type"] == "nfc"
         assert payload["data"] == {"user_id": "u1", "token": "DEADBEEF"}
+
+    def test_create_preserves_token_and_pin_input(self) -> None:
+        model = Credential(type="pin", user_id="user1", token="nfc-token", pin_code="123456")
+
+        payload = to_controller_create(model)
+
+        assert payload["data"]["token"] == "nfc-token"
+        assert payload["data"]["pin_code"] == "123456"
 
     def test_pin_emits_type_user_id_pin_code(self) -> None:
         model = Credential(type="pin", user_id="u2", pin_code="1234")

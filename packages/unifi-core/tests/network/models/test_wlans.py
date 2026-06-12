@@ -92,6 +92,13 @@ class TestFromController:
         assert wlan.name is None
         assert wlan.enabled is None
 
+    def test_wlan_from_controller_carries_passphrase_verbatim(self) -> None:
+        # The domain model is lossless: redaction is a response-boundary
+        # concern (MCP tool / serializer / GraphQL type), not the model's job.
+        model = from_controller({"_id": "w1", "name": "SSID", "x_passphrase": "wifi-secret"})
+
+        assert model.x_passphrase == "wifi-secret"
+
 
 class TestToControllerCreate:
     def test_maps_network_id_to_networkconf_id(self) -> None:
@@ -116,6 +123,12 @@ class TestToControllerCreate:
         model = Wlan(name="Secure", security="wpa2-psk", x_passphrase="mysecret")
         payload = to_controller_create(model)
         assert payload["x_passphrase"] == "mysecret"
+
+    def test_create_and_update_preserve_caller_passphrase(self) -> None:
+        model = Wlan(name="SSID", security="wpapsk", x_passphrase="wifi-secret")
+
+        assert to_controller_create(model)["x_passphrase"] == "wifi-secret"
+        assert to_controller_update({"x_passphrase": "new-secret"})["x_passphrase"] == "new-secret"
 
     def test_omits_none_fields(self) -> None:
         model = Wlan(name="Minimal", security="open")

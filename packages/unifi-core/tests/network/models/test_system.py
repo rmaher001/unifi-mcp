@@ -102,6 +102,7 @@ class TestSnmpFromController:
         }
         settings = snmp_from_controller(raw)
         assert settings.enabled is True
+        # The domain model is lossless: redaction is a response-boundary concern.
         assert settings.community == "public"
         assert settings.port == 161
         assert settings.version == "v2c"

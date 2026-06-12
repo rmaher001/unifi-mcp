@@ -27,6 +27,7 @@ from dataclasses import asdict
 from typing import Any
 
 import strawberry
+from unifi_core.redaction import redact_value
 
 
 def _get(obj: Any, *keys: str, default: Any = None) -> Any:
@@ -298,7 +299,7 @@ class SnmpSettings:
         return {"kind": kind}
 
     @classmethod
-    def from_manager_output(cls, obj: Any) -> "SnmpSettings":
+    def from_manager_output(cls, obj: Any, *, include_sensitive: bool = False) -> "SnmpSettings":
         # Manager returns list[dict]; type unwraps first item to match the
         # legacy serializer contract.
         if isinstance(obj, list):
@@ -313,7 +314,9 @@ class SnmpSettings:
             )
         return cls(
             enabled=bool(obj.get("enabled", False)),
-            community=_get(obj, "community", default=""),
+            community=redact_value(
+                "community", _get(obj, "community", default=""), include_sensitive=include_sensitive
+            ),
             port=_get(obj, "port"),
             version=_get(obj, "version"),
             _had_payload=True,

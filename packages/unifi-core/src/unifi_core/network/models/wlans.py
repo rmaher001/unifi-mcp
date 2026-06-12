@@ -213,6 +213,9 @@ def from_controller(raw: Any) -> Wlan:
 
     The controller stores the network association as 'networkconf_id'
     and the VLAN as 'vlan'. Both are normalised to model field names.
+
+    Secrets are carried verbatim — redaction is a response-boundary
+    concern applied by the serving surface, not the domain model.
     """
     return Wlan(
         id=_get(raw, "_id") or _get(raw, "id"),

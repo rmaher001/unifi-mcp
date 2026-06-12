@@ -106,6 +106,10 @@ def from_controller(raw: Any) -> Credential:
     Coalesces:
     - ``last_used`` / ``last_used_at`` → ``last_used``
     - ``expiry`` / ``expires_at`` → ``expiry``
+
+    Secrets (``token``, ``pin_code``) are carried verbatim — redaction is a
+    response-boundary concern applied by the serving surface, not the domain
+    model.
     """
     last_used = _get(raw, "last_used") or _get(raw, "last_used_at")
     expiry = _get(raw, "expiry") or _get(raw, "expires_at")

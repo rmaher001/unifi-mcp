@@ -167,6 +167,9 @@ def snmp_from_controller(raw: Any) -> SnmpSettings:
     """Build a SnmpSettings from a controller API response.
 
     The controller returns SNMP settings as a list; this unwraps the first element.
+
+    The community string is carried verbatim — redaction is a response-boundary
+    concern applied by the serving surface, not the domain model.
     """
     if isinstance(raw, list):
         raw = raw[0] if raw else {}

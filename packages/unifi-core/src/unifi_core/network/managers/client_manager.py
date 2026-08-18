@@ -6,6 +6,7 @@ from aiounifi.models.api import ApiRequest
 from aiounifi.models.client import Client
 
 from unifi_core.exceptions import UniFiNotFoundError
+from unifi_core.mac import mac_equal
 from unifi_core.network.managers.connection_manager import ConnectionManager
 
 logger = logging.getLogger("unifi-network-mcp")
@@ -145,7 +146,7 @@ class ClientManager:
         try:
             active = await self.get_clients()
             for c in active:
-                if self._mac_of(c) == client_mac:
+                if mac_equal(self._mac_of(c), client_mac):
                     active_record = c
                     break
         except Exception as e:
@@ -157,7 +158,7 @@ class ClientManager:
         try:
             all_clients = await self.get_all_clients()
             for c in all_clients:
-                if self._mac_of(c) == client_mac:
+                if mac_equal(self._mac_of(c), client_mac):
                     user_record = c
                     break
         except Exception as e:

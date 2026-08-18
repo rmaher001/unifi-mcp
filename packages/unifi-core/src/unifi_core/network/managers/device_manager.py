@@ -6,6 +6,7 @@ from aiounifi.models.api import ApiRequest
 from aiounifi.models.device import Device
 
 from unifi_core.exceptions import UniFiNotFoundError
+from unifi_core.mac import mac_equal
 from unifi_core.network.managers.connection_manager import ConnectionManager
 from unifi_core.network.models.devices import normalize_radio_channel, normalize_radio_ht
 
@@ -53,7 +54,7 @@ class DeviceManager:
             UniFiNotFoundError: If the device does not exist.
         """
         devices = await self.get_devices()
-        device: Optional[Device] = next((d for d in devices if d.mac == device_mac), None)
+        device: Optional[Device] = next((d for d in devices if mac_equal(d.mac, device_mac)), None)
         if device is None:
             raise UniFiNotFoundError("device", device_mac)
         return device

@@ -9,6 +9,7 @@ from aiounifi.models.dpi_restriction_group import (
 )  # Import DPIGroup model
 
 from unifi_core.network.managers.client_manager import ClientManager  # Needed for get_top_clients
+from unifi_core.mac import mac_equal
 from unifi_core.network.managers.connection_manager import ConnectionManager
 from unifi_core.network.managers.device_manager import DeviceManager
 
@@ -736,9 +737,8 @@ class StatsManager:
             response = await self._connection.request(api_request)
 
             clients = response if isinstance(response, list) else []
-            target = client_mac.lower()
             raw = next(
-                (c for c in clients if isinstance(c, dict) and str(c.get("mac", "")).lower() == target),
+                (c for c in clients if isinstance(c, dict) and mac_equal(c.get("mac"), client_mac)),
                 None,
             )
             if raw is None:

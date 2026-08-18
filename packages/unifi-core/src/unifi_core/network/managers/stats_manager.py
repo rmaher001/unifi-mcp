@@ -8,8 +8,8 @@ from aiounifi.models.dpi_restriction_group import (
     DPIRestrictionGroup,
 )  # Import DPIGroup model
 
-from unifi_core.network.managers.client_manager import ClientManager  # Needed for get_top_clients
 from unifi_core.mac import mac_equal
+from unifi_core.network.managers.client_manager import ClientManager  # Needed for get_top_clients
 from unifi_core.network.managers.connection_manager import ConnectionManager
 from unifi_core.network.managers.device_manager import DeviceManager
 

@@ -6,7 +6,7 @@ from aiounifi.models.api import ApiRequest
 from aiounifi.models.device import Device
 
 from unifi_core.exceptions import UniFiNotFoundError
-from unifi_core.mac import mac_equal
+from unifi_core.mac import mac_equal, normalize_mac
 from unifi_core.network.managers.connection_manager import ConnectionManager
 from unifi_core.network.models.devices import normalize_radio_channel, normalize_radio_ht
 
@@ -53,6 +53,7 @@ class DeviceManager:
         Raises:
             UniFiNotFoundError: If the device does not exist.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         devices = await self.get_devices()
         device: Optional[Device] = next((d for d in devices if mac_equal(d.mac, device_mac)), None)
         if device is None:
@@ -65,6 +66,7 @@ class DeviceManager:
         Raises:
             UniFiNotFoundError: If the device does not exist.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         await self.get_device_details(device_mac)  # existence check; raises on miss
         try:
             api_request = ApiRequest(
@@ -86,6 +88,7 @@ class DeviceManager:
         Raises:
             UniFiNotFoundError: If the device does not exist.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         try:
             device = await self.get_device_details(device_mac)  # raises on miss
             if "_id" not in device.raw:
@@ -108,6 +111,7 @@ class DeviceManager:
         Raises:
             UniFiNotFoundError: If the device does not exist.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         await self.get_device_details(device_mac)  # existence check; raises on miss
         try:
             api_request = ApiRequest(
@@ -129,6 +133,7 @@ class DeviceManager:
         Raises:
             UniFiNotFoundError: If the device does not exist.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         await self.get_device_details(device_mac)  # existence check; raises on miss
         try:
             api_request = ApiRequest(
@@ -154,6 +159,7 @@ class DeviceManager:
         Returns:
             True on success, False on failure.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         try:
             cmd = "set-locate" if enabled else "unset-locate"
             api_request = ApiRequest(
@@ -177,6 +183,7 @@ class DeviceManager:
         Returns:
             True on success, False on failure.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         try:
             api_request = ApiRequest(
                 method="post",
@@ -198,6 +205,7 @@ class DeviceManager:
         Raises:
             UniFiNotFoundError: If the device does not exist.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         device = await self.get_device_details(device_mac)  # raises on miss
         if "radio_table" not in device.raw:
             return None
@@ -252,6 +260,7 @@ class DeviceManager:
         Returns:
             True on success, False on failure.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         try:
             device = await self.get_device_details(device_mac)  # raises on miss
             if "_id" not in device.raw:
@@ -293,6 +302,7 @@ class DeviceManager:
         Returns:
             True on success, False on failure.
         """
+        gateway_mac = normalize_mac(gateway_mac) or gateway_mac
         try:
             api_request = ApiRequest(
                 method="post",
@@ -315,6 +325,7 @@ class DeviceManager:
         Returns:
             Dict with speedtest status fields, or empty dict on failure.
         """
+        gateway_mac = normalize_mac(gateway_mac) or gateway_mac
         try:
             api_request = ApiRequest(
                 method="post",
@@ -364,6 +375,7 @@ class DeviceManager:
         Returns:
             True on success, False on failure.
         """
+        ap_mac = normalize_mac(ap_mac) or ap_mac
         try:
             api_request = ApiRequest(
                 method="post",
@@ -386,6 +398,7 @@ class DeviceManager:
         Returns:
             List of scan result dicts, or empty list on failure.
         """
+        ap_mac = normalize_mac(ap_mac) or ap_mac
         cache_key = f"{CACHE_PREFIX_RF_SCAN}_{ap_mac}_{self._connection.site}"
         cached_data: Optional[List[Dict[str, Any]]] = self._connection.get_cached(cache_key)
         if cached_data is not None:
@@ -438,6 +451,7 @@ class DeviceManager:
         Returns:
             True on success, False on failure.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         try:
             device = await self.get_device_details(device_mac)
             if not device or "_id" not in device.raw:
@@ -468,6 +482,7 @@ class DeviceManager:
         Returns:
             True on success, False on failure.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         try:
             device = await self.get_device_details(device_mac)
             if not device or "_id" not in device.raw:
@@ -520,6 +535,7 @@ class DeviceManager:
         Raises:
             UniFiNotFoundError: If the device does not exist.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         device = await self.get_device_details(device_mac)  # raises on miss
         if not self._is_pdu(device.raw):
             return None
@@ -584,6 +600,7 @@ class DeviceManager:
         Raises:
             UniFiNotFoundError: If the device does not exist.
         """
+        device_mac = normalize_mac(device_mac) or device_mac
         if outlet_index < 1:
             raise ValueError("outlet_index must be >= 1.")
         device = await self.get_device_details(device_mac)  # raises on miss

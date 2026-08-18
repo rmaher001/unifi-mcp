@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional
 from aiounifi.models.api import ApiRequestV2
 
 from unifi_core.exceptions import UniFiNotFoundError
+from unifi_core.mac import normalize_mac
 from unifi_core.merge import deep_merge
 from unifi_core.network.managers.connection_manager import ConnectionManager
 
@@ -36,6 +37,17 @@ OON_PATH_LIST = "/object-oriented-network-configs"
 OON_PATH_SINGLE = "/object-oriented-network-config"
 
 
+def _normalize_target_value(target_type: Any, value: Any) -> Any:
+    """Lowercase a MAC target; leave every other target type untouched.
+
+    Only ``MAC`` targets are addresses. A NETWORK_GROUP_ID is an opaque
+    identifier and case-folding it would change which object it names.
+    """
+    if str(target_type).upper() == "MAC":
+        return normalize_mac(value) or value
+    return value
+
+
 def _normalize_oon_targets(target_type: str | None, targets: Any) -> Any:
     """Translate friendly target inputs into the controller's target objects."""
     if not isinstance(targets, list):
@@ -45,7 +57,7 @@ def _normalize_oon_targets(target_type: str | None, targets: Any) -> Any:
     normalized: list[Any] = []
     for target in targets:
         if isinstance(target, str):
-            normalized.append({"type": default_type, "value": target})
+            normalized.append({"type": default_type, "value": _normalize_target_value(default_type, target)})
             continue
 
         if isinstance(target, dict):
@@ -63,7 +75,11 @@ def _normalize_oon_targets(target_type: str | None, targets: Any) -> Any:
                     or item.pop("target_id", None)
                     or item.pop("targetId", None)
                 )
-            normalized.append({"type": item_type, "value": item_value} if item_value is not None else item)
+            normalized.append(
+                {"type": item_type, "value": _normalize_target_value(item_type, item_value)}
+                if item_value is not None
+                else item
+            )
             continue
 
         normalized.append(target)

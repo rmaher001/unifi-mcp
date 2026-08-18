@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 import strawberry
 from strawberry.types import Info
+from unifi_core.mac import mac_equal
 
 if TYPE_CHECKING:
     from unifi_api.graphql.types.network.device import Device
@@ -151,7 +152,7 @@ class Client:
             else:
                 raw = getattr(d, "raw", None)
                 d_mac = raw.get("mac") if isinstance(raw, dict) else getattr(d, "mac", None)
-            if d_mac == self._ap_mac:
+            if mac_equal(d_mac, self._ap_mac):
                 instance = Device.from_manager_output(d)
                 instance._controller_id = self._controller_id
                 instance._site = site

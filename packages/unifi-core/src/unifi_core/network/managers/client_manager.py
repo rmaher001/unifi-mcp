@@ -6,7 +6,7 @@ from aiounifi.models.api import ApiRequest
 from aiounifi.models.client import Client
 
 from unifi_core.exceptions import UniFiNotFoundError
-from unifi_core.mac import mac_equal
+from unifi_core.mac import mac_equal, normalize_mac
 from unifi_core.network.managers.connection_manager import ConnectionManager
 
 logger = logging.getLogger("unifi-network-mcp")
@@ -141,6 +141,7 @@ class ClientManager:
                 (e.g., controller offline) — re-raised so callers see an
                 accurate failure cause instead of a misleading not-found.
         """
+        client_mac = normalize_mac(client_mac) or client_mac
         active_record: Optional[Any] = None
         active_error: Optional[Exception] = None
         try:
@@ -198,6 +199,7 @@ class ClientManager:
         Raises:
             UniFiNotFoundError: If the client does not exist.
         """
+        client_mac = normalize_mac(client_mac) or client_mac
         await self.get_client_details(client_mac)  # existence check; raises on miss
         try:
             # Construct ApiRequest
@@ -221,6 +223,7 @@ class ClientManager:
         Raises:
             UniFiNotFoundError: If the client does not exist.
         """
+        client_mac = normalize_mac(client_mac) or client_mac
         await self.get_client_details(client_mac)  # existence check; raises on miss
         try:
             # Construct ApiRequest
@@ -244,6 +247,7 @@ class ClientManager:
         Raises:
             UniFiNotFoundError: If the client does not exist.
         """
+        client_mac = normalize_mac(client_mac) or client_mac
         try:
             client = await self.get_client_details(client_mac)  # raises on miss
             if "_id" not in client.raw:
@@ -278,6 +282,7 @@ class ClientManager:
         Raises:
             UniFiNotFoundError: If the client does not exist.
         """
+        client_mac = normalize_mac(client_mac) or client_mac
         await self.get_client_details(client_mac)  # existence check; raises on miss
         try:
             api_request = ApiRequest(
@@ -300,6 +305,7 @@ class ClientManager:
         also accepts unknown MACs without erroring), preserving the
         delete-style semantics from spec §6.3.
         """
+        client_mac = normalize_mac(client_mac) or client_mac
         try:
             api_request = ApiRequest(
                 method="post",
@@ -333,6 +339,7 @@ class ClientManager:
         Raises:
             UniFiNotFoundError: If the client does not exist.
         """
+        client_mac = normalize_mac(client_mac) or client_mac
         await self.get_client_details(client_mac)  # existence check; raises on miss
         try:
             payload = {"mac": client_mac, "cmd": "authorize-guest", "minutes": minutes}
@@ -360,6 +367,7 @@ class ClientManager:
         Raises:
             UniFiNotFoundError: If the client does not exist.
         """
+        client_mac = normalize_mac(client_mac) or client_mac
         await self.get_client_details(client_mac)  # existence check; raises on miss
         try:
             api_request = ApiRequest(
@@ -425,6 +433,7 @@ class ClientManager:
         Returns:
             True if the update was successful, False otherwise.
         """
+        client_mac = normalize_mac(client_mac) or client_mac
         try:
             # Get client to find their internal _id; raises UniFiNotFoundError on miss.
             client = await self.get_client_details(client_mac)

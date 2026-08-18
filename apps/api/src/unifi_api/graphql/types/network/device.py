@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 import strawberry
 from strawberry.types import Info
+from unifi_core.mac import mac_equal
 from unifi_core.network.models.devices import normalize_radio_channel, normalize_radio_ht
 
 if TYPE_CHECKING:
@@ -116,7 +117,7 @@ class Device:
             else:
                 raw = getattr(c, "raw", None)
                 ap_mac = raw.get("ap_mac") if isinstance(raw, dict) else getattr(c, "ap_mac", None)
-            if ap_mac == self.mac:
+            if mac_equal(ap_mac, self.mac):
                 inst = Client.from_manager_output(c)
                 inst._controller_id = self._controller_id
                 inst._site = site

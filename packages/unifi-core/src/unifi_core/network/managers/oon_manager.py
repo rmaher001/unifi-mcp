@@ -135,6 +135,31 @@ def normalize_oon_create_payload(policy_data: Dict[str, Any]) -> Dict[str, Any]:
     return normalized
 
 
+def normalize_oon_update_payload(
+    update_data: Dict[str, Any], existing: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Apply the create path's shaping to a PARTIAL update.
+
+    ``target_type`` decides how a target is shaped, and a partial update need
+    not restate it - so fall back to the policy already on the controller.
+
+    When it is resolvable from neither, ``targets`` is left exactly as the
+    caller sent it. Guessing would be worse than doing nothing: the default is
+    ``MAC``, which lowercases the value, and a NETWORK_GROUP_ID is an opaque
+    identifier that a case change renames.
+    """
+    normalized = update_data.copy()
+    if "secure" in normalized:
+        normalized["secure"] = _normalize_secure_config(normalized["secure"])
+    if "targets" not in normalized:
+        return normalized
+    target_type = normalized.get("target_type") or (existing or {}).get("target_type")
+    if not target_type:
+        return normalized
+    normalized["targets"] = _normalize_oon_targets(target_type, normalized["targets"])
+    return normalized
+
+
 class OonManager:
     """Manages OON (Object-Oriented Network) policies on the UniFi controller."""
 
@@ -278,6 +303,12 @@ class OonManager:
         existing = await self.get_oon_policy_by_id(policy_id)  # raises on miss
         if not update_data:
             return existing
+
+        # The create path runs this; the update path did not, so a partial
+        # update lost both the MAC casing and the bare-string -> {type, value}
+        # target shaping. target_type comes from the existing policy when the
+        # caller does not restate it.
+        update_data = normalize_oon_update_payload(update_data, existing)
 
         merged_data = deep_merge(existing, update_data)
         api_request = ApiRequestV2(method="put", path=f"{OON_PATH_SINGLE}/{policy_id}", data=merged_data)

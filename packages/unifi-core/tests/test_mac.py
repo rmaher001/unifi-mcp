@@ -161,3 +161,185 @@ def test_client_wifi_details_cache_key_is_case_stable() -> None:
     normalize_at = src.index("normalize_mac(client_mac)")
     cache_at = src.index("cache_key =")
     assert normalize_at < cache_at, "the cache key is built before the MAC is normalized"
+
+
+# --- Config payloads carrying MAC lists -------------------------------------
+#
+# Same round-trip asymmetry that justified normalizing the ACL side: the
+# controller stores these lowercase, so an uppercase create does not match a
+# later list.
+
+
+def test_wlan_mac_filter_list_is_lowercased() -> None:
+    from unifi_core.network.models.wlans import Wlan
+
+    w = Wlan(mac_filter_list=["AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66"])
+    assert w.mac_filter_list == ["aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66"]
+
+
+def test_content_filter_client_macs_are_lowercased() -> None:
+    from unifi_core.network.models.content_filter import ContentFilter
+
+    c = ContentFilter(client_macs=["AA:BB:CC:DD:EE:FF"])
+    assert c.client_macs == ["aa:bb:cc:dd:ee:ff"]
+
+
+def test_ap_group_device_macs_are_lowercased() -> None:
+    from unifi_core.network.models.ap_group import ApGroup
+
+    g = ApGroup(device_macs=["AA:BB:CC:DD:EE:FF"])
+    assert g.device_macs == ["aa:bb:cc:dd:ee:ff"]
+
+
+def test_config_mac_lists_leave_unusable_entries_alone() -> None:
+    """Normalization must not drop or rewrite what it cannot parse."""
+    from unifi_core.network.models.ap_group import ApGroup
+
+    assert ApGroup(device_macs=[""]).device_macs == [""]
+
+
+# --- Update paths bypass the models -----------------------------------------
+#
+# `to_controller_update` takes the caller's RAW dict and never constructs the
+# model, so a field validator does nothing for it. These write paths need the
+# normalization applied where the payload is actually built.
+
+
+def test_ap_group_update_lowercases_device_macs() -> None:
+    from unifi_core.network.models.ap_group import to_controller_update
+
+    assert to_controller_update({"device_macs": ["AA:BB:CC:DD:EE:FF"]})["device_macs"] == ["aa:bb:cc:dd:ee:ff"]
+
+
+def test_content_filter_update_lowercases_client_macs() -> None:
+    from unifi_core.network.models.content_filter import to_controller_update
+
+    assert to_controller_update({"client_macs": ["AA:BB:CC:DD:EE:FF"]})["client_macs"] == ["aa:bb:cc:dd:ee:ff"]
+
+
+def test_client_group_update_lowercases_members() -> None:
+    from unifi_core.network.models.client_group import to_controller_update
+
+    assert to_controller_update({"members": ["AA:BB:CC:DD:EE:FF"]})["members"] == ["aa:bb:cc:dd:ee:ff"]
+
+
+def test_acl_update_lowercases_both_mac_sides() -> None:
+    from unifi_core.network.models.acl import to_controller_update
+
+    out = to_controller_update({"source_macs": ["AA:BB:CC:DD:EE:FF"], "destination_macs": ["11:22:33:44:55:AA"]})
+    assert out["traffic_source"]["specific_mac_addresses"] == ["aa:bb:cc:dd:ee:ff"]
+    assert out["traffic_destination"]["specific_mac_addresses"] == ["11:22:33:44:55:aa"]
+
+
+def test_firewall_policy_endpoints_lowercase_client_macs() -> None:
+    """`source`/`destination` are opaque dicts that carry a client_macs list."""
+    from unifi_core.network.models.firewall import normalize_policy_update
+
+    out = normalize_policy_update(
+        {"name": "x", "source": {"matching_target": "CLIENT", "client_macs": ["AA:BB:CC:DD:EE:FF"]}}
+    )
+    assert out["source"]["client_macs"] == ["aa:bb:cc:dd:ee:ff"]
+
+
+def test_oon_update_normalizes_targets_like_create() -> None:
+    """The update path skipped the create normalizer, losing both the case and
+    the bare-string -> {type,value} shaping."""
+    from unifi_core.network.managers.oon_manager import normalize_oon_update_payload
+
+    out = normalize_oon_update_payload({"target_type": "CLIENTS", "targets": ["AA:BB:CC:DD:EE:FF"]})
+    assert out["targets"] == [{"type": "MAC", "value": "aa:bb:cc:dd:ee:ff"}]
+
+
+def test_oon_update_takes_target_type_from_the_existing_policy() -> None:
+    """A partial update need not restate target_type, and the shaping depends
+    on it. GROUPS is the case that bites: the MAC default would both mis-type
+    the target and case-fold an opaque group id."""
+    from unifi_core.network.managers.oon_manager import normalize_oon_update_payload
+
+    out = normalize_oon_update_payload({"targets": ["AbC123XyZ"]}, {"target_type": "GROUPS"})
+    assert out["targets"] == [{"type": "NETWORK_GROUP_ID", "value": "AbC123XyZ"}]
+
+
+def test_oon_update_leaves_targets_alone_when_target_type_is_unknowable() -> None:
+    """Guessing is worse than doing nothing: the default is MAC, which would
+    lowercase an opaque group id and rename the object it points at."""
+    from unifi_core.network.managers.oon_manager import normalize_oon_update_payload
+
+    out = normalize_oon_update_payload({"targets": ["AbC123XyZ"]}, {})
+    assert out["targets"] == ["AbC123XyZ"]
+
+
+def test_oon_update_normalizes_secure_even_without_targets() -> None:
+    """The secure block must not be gated behind an unrelated key."""
+    from unifi_core.network.managers.oon_manager import normalize_oon_update_payload
+
+    out = normalize_oon_update_payload({"secure": {"apps": ["facebook"]}}, {"target_type": "CLIENTS"})
+    assert out["secure"] != {"apps": ["facebook"]}, "secure was passed through unshaped"
+
+
+def test_oon_update_is_wired_into_update_oon_policy() -> None:
+    """Removing the call restores the original bug with a green suite, so the
+    wiring itself needs a test."""
+    import inspect
+
+    from unifi_core.network.managers.oon_manager import OonManager
+
+    src = inspect.getsource(OonManager.update_oon_policy)
+    assert "normalize_oon_update_payload(" in src
+
+
+def test_normalize_mac_list_never_yields_none() -> None:
+    """Dropping the `or v` would put a literal None into a PUT payload."""
+    from unifi_core.mac import normalize_mac_list
+
+    assert normalize_mac_list(["", "  ", "AA:BB:CC:DD:EE:FF"]) == ["", "  ", "aa:bb:cc:dd:ee:ff"]
+
+
+def test_normalize_mac_list_passes_a_non_list_through() -> None:
+    """Without the isinstance guard a bare string is shredded per character."""
+    from unifi_core.mac import normalize_mac_list
+
+    assert normalize_mac_list("AA:BB:CC:DD:EE:FF") == "AA:BB:CC:DD:EE:FF"
+    assert normalize_mac_list(None) is None
+
+
+# --- Create paths, normalized at the manager boundary ------------------------
+#
+# The MCP tool layer and the apps/api dispatch each assemble these payloads
+# themselves, so neither a model validator nor a to_controller_* builder is on
+# the path. The manager is the one boundary they share.
+
+
+def test_client_group_create_normalizes_members_at_the_manager() -> None:
+    import inspect
+
+    from unifi_core.network.managers.client_group_manager import ClientGroupManager
+
+    src = inspect.getsource(ClientGroupManager.create_client_group)
+    assert "normalize_mac_list" in src
+    assert src.index("normalize_mac_list") < src.index("ApiRequestV2")
+
+
+def test_ap_group_create_and_update_normalize_at_the_manager() -> None:
+    import inspect
+
+    from unifi_core.network.managers.network_manager import NetworkManager
+
+    create_src = inspect.getsource(NetworkManager.create_ap_group)
+    assert "normalize_mac_list" in create_src
+    assert create_src.index("normalize_mac_list") < create_src.index("ApiRequestV2")
+
+    update_src = inspect.getsource(NetworkManager.update_ap_group)
+    # Must precede deep_merge AND _unpersisted_fields, or an uppercase
+    # restatement reads as a stuck field and reports a false failure.
+    assert update_src.index("normalize_mac_list") < update_src.index("deep_merge")
+
+
+def test_firewall_create_normalizes_endpoint_macs_at_the_manager() -> None:
+    import inspect
+
+    from unifi_core.network.managers.firewall_manager import FirewallManager
+
+    src = inspect.getsource(FirewallManager.create_firewall_policy)
+    assert "_normalize_endpoint_macs" in src
+    assert src.index("_normalize_endpoint_macs") < src.index("ApiRequestV2")

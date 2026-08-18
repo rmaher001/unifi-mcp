@@ -29,7 +29,7 @@ turns into a request the controller may still reject, later and more quietly.
 import re
 from typing import Any, Optional
 
-__all__ = ["normalize_mac", "mac_equal", "looks_like_mac"]
+__all__ = ["normalize_mac", "mac_equal", "looks_like_mac", "normalize_mac_list"]
 
 # Six hex pairs separated by ':' or '-', or twelve bare hex digits.
 _MAC_RE = re.compile(r"^(?:[0-9a-f]{2}([:-]))(?:[0-9a-f]{2}\1){4}[0-9a-f]{2}$|^[0-9a-f]{12}$")
@@ -76,3 +76,20 @@ def mac_equal(a: Any, b: Any) -> bool:
     """
     normalized = normalize_mac(a)
     return normalized is not None and normalized == normalize_mac(b)
+
+
+def normalize_mac_list(values: Any) -> Any:
+    """Lowercase every MAC in a list, leaving unusable entries as they are.
+
+    For the config payloads that carry a MAC list - ACL sides, AP-group members,
+    content-filter clients, client-group members. The partial-update builders
+    take the caller's raw dict and never construct their model, so a pydantic
+    field validator does not run for them; this is what those builders call.
+
+    Anything that is not a list is returned unchanged, so a caller passing a
+    malformed value gets the same validation error it always did rather than a
+    new one from here.
+    """
+    if not isinstance(values, list):
+        return values
+    return [normalize_mac(v) or v for v in values]

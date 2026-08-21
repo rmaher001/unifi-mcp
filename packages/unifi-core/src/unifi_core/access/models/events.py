@@ -12,6 +12,8 @@ to ISO 8601 strings via ``_stringify_dt``. The ``top_users`` and
 
 from __future__ import annotations
 
+import hashlib
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
@@ -35,6 +37,11 @@ class Event(BaseModel):
     )
     credential_id: Optional[str] = Field(
         default=None, description="Credential UUID used in the event", json_schema_extra={"mutable": False}
+    )
+    message: Optional[str] = Field(
+        default=None,
+        description="Human-readable summary of the event, as the controller renders it",
+        json_schema_extra={"mutable": False},
     )
     result: Optional[str] = Field(
         default=None, description="Event result (granted, denied, etc.)", json_schema_extra={"mutable": False}
@@ -92,15 +99,62 @@ def _stringify_dt(value: Any) -> Optional[str]:
     return str(value)
 
 
+def _epoch_millis_to_iso(value: Any) -> Optional[str]:
+    """Render an epoch-millisecond integer as a UTC ISO 8601 string."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    try:
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _metadata_entry_id(raw: Any, *keys: str, expected_type: Optional[str] = None) -> Optional[str]:
+    """Pull an id out of the system log's ``metadata`` sub-objects.
+
+    Each entry looks like ``{"id": ..., "type": ..., "display_name": ...}``.
+    The first key resolving to an entry with an id wins.
+
+    ``expected_type`` guards against mis-attribution, which the entries invite:
+    ``actor`` is whatever caused the event, and for an ``access.dps.status.update``
+    record that is the door hub rather than a person. Reading its id ungated
+    reports a device as the user who opened the door. The same applies to
+    readers, which carry a device id that is not the id of any door.
+    """
+    metadata = _get(raw, "metadata")
+    if not isinstance(metadata, dict):
+        return None
+    for key in keys:
+        entry = metadata.get(key)
+        if not isinstance(entry, dict) or not entry.get("id"):
+            continue
+        if expected_type is not None and entry.get("type") != expected_type:
+            continue
+        return str(entry["id"])
+    return None
+
+
 def event_from_controller(raw: Any) -> Event:
-    """Build an Event from a manager dict or object."""
+    """Build an Event from a manager dict or object.
+
+    Handles both event shapes this project sees. The websocket/legacy records
+    carry ``type``/``timestamp``/``door_id``/``user_id`` directly. The
+    ``insights/system_log/search`` records - what ``list_events`` actually
+    returns - use ``event_type``, ``published`` in epoch milliseconds, and
+    nest the actor, door and credential inside ``metadata``. Reading only the
+    first set left every system-log row serializing to nothing but an empty
+    id and a result.
+    """
     return Event(
         id=_get(raw, "id"),
-        type=_get(raw, "type"),
-        timestamp=_stringify_dt(_get(raw, "timestamp") or _get(raw, "time")),
-        door_id=_get(raw, "door_id"),
-        user_id=_get(raw, "user_id"),
-        credential_id=_get(raw, "credential_id"),
+        type=_get(raw, "type") or _get(raw, "event_type") or _get(raw, "log_key"),
+        timestamp=(
+            _stringify_dt(_get(raw, "timestamp") or _get(raw, "time")) or _epoch_millis_to_iso(_get(raw, "published"))
+        ),
+        door_id=_get(raw, "door_id") or _metadata_entry_id(raw, "door", expected_type="door"),
+        user_id=_get(raw, "user_id") or _metadata_entry_id(raw, "actor", "user", expected_type="user"),
+        credential_id=_get(raw, "credential_id") or _metadata_entry_id(raw, "credential"),
+        message=_get(raw, "message"),
         result=_get(raw, "result"),
     )
 
@@ -121,3 +175,55 @@ def activity_summary_from_controller(raw: Any) -> ActivitySummary:
         top_users=raw.get("top_users"),
         buckets=raw.get("buckets") or raw.get("histogram"),
     )
+
+
+def _sortable_millis(value: Any) -> int:
+    """Coerce an event time to sortable epoch milliseconds.
+
+    Access event times arrive in three shapes: ``published`` as epoch millis on
+    system-log rows, an ISO 8601 string once normalised, and a bare number on
+    legacy/websocket rows. A plain ``int()`` raises ``ValueError`` on the ISO
+    form, which is enough to take a whole events query down.
+    """
+    if value is None or isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    text = str(value).strip()
+    if not text:
+        return 0
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000)
+    except ValueError:
+        return 0
+
+
+def event_sort_key(raw: Any) -> tuple[int, str]:
+    """Canonical ``(time, identity)`` ordering key for an Access event row.
+
+    Every surface must agree on this, because cursor pagination windows with a
+    strict ``(ts, id) < (last_ts, last_id)``: two rows sharing a key make the
+    next page drop both, and a key that differs between requests silently skips
+    or repeats rows.
+
+    System-log rows are why the identity is not simply ``id`` - they carry
+    ``id: ""``, so without a fallback every row of a page collapses onto the
+    same key and page 2 comes back empty. The fallback digests the fields that
+    actually distinguish a row, so it stays stable across requests.
+    """
+    published = _get(raw, "published")
+    ts = _sortable_millis(published) if published is not None else 0
+    if not ts:
+        ts = _sortable_millis(_get(raw, "timestamp") or _get(raw, "time"))
+
+    identity = _get(raw, "id") or ""
+    if not identity:
+        basis = "|".join(
+            str(_get(raw, key) or "") for key in ("published", "log_key", "event_type", "message", "result")
+        )
+        identity = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
+    return (ts, str(identity))

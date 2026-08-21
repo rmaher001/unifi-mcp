@@ -19,6 +19,7 @@ import logging
 import time
 from collections import deque
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from unifi_core.exceptions import UniFiConnectionError, UniFiNotFoundError
@@ -91,6 +92,59 @@ class EventBuffer:
 # ---------------------------------------------------------------------------
 
 
+# The topics are the Access UI's own syslog Category filters, lowercased and
+# snake_cased. All seven verified against a live controller; anything else is
+# rejected with CODE_PARAMS_INVALID "no such topic".
+#
+# "unlocks" is the door history - access.door.unlock and access.dps.status.update
+# records, i.e. "Access Granted (Face)" and door open/close. Guessing at names
+# like door_openings or access finds nothing, which is what made this look
+# unreachable.
+SYSTEM_LOG_TOPICS: tuple[str, ...] = (
+    "unlocks",
+    "access_denial",
+    "ring",
+    "updates",
+    "critical",
+    "admin",
+    "admin_activity",
+)
+
+
+# The controller's histogram endpoint fails with CODE_SYSTEM_ERROR once the
+# request spans too many buckets. Measured live: 100 buckets succeed, 104 and
+# above return a 500. Kept well under the observed edge.
+_MAX_HISTOGRAM_BUCKETS = 96
+
+# Finest-to-coarsest: the loop below returns the FIRST interval that fits, so
+# this order is what makes the chosen bucket the finest one available. Reordering
+# it would silently pick the coarsest interval every time.
+_HISTOGRAM_INTERVALS = (3600, 7200, 21600, 43200, 86400, 604800)
+
+
+def _histogram_interval(days: int) -> int:
+    """Pick the finest bucket interval whose bucket count the controller accepts.
+
+    A fixed ``interval=3600`` meant the default 7-day window asked for 168
+    buckets and always failed, so the tool never worked at its own default.
+
+    Raises ``ValueError`` when no interval fits. Falling back to the coarsest
+    one instead would re-create the very failure this guards: 1000 days at one
+    bucket per week is 142 buckets, back over the limit. ``days`` is unbounded
+    on the MCP tool and the GraphQL resolver, so the bound has to be here.
+    """
+    span = max(int(days), 1) * 86400
+    for interval in _HISTOGRAM_INTERVALS:
+        if span // interval <= _MAX_HISTOGRAM_BUCKETS:
+            return interval
+    max_days = _MAX_HISTOGRAM_BUCKETS * _HISTOGRAM_INTERVALS[-1] // 86400
+    raise ValueError(
+        f"A {int(days)}-day activity window cannot be served: even at one bucket "
+        f"per week it exceeds the controller's histogram limit. "
+        f"Request at most {max_days} days."
+    )
+
+
 class EventManager:
     """Domain logic for UniFi Access events.
 
@@ -136,32 +190,64 @@ class EventManager:
             return
 
         try:
-            handlers = {
-                "door_open": self._on_event,
-                "door_close": self._on_event,
-                "access_granted": self._on_event,
-                "access_denied": self._on_event,
-                "door_alarm": self._on_event,
-            }
+            # The client dispatches on ``WebsocketMessage.event``, whose values
+            # are the controller's dotted names - ``access.logs.add``,
+            # ``access.hw.door_bell``, ``access.data.device.remote_unlock`` and
+            # friends. Enumerating friendly names like ``door_open`` matched
+            # none of them, so every message hit the client's "unhandled" branch
+            # and the buffer stayed empty. ``"*"`` is the client's wildcard.
+            handlers = {"*": self._on_event}
             self._cm.start_websocket(handlers)
             logger.info("[event-mgr] Websocket subscription started.")
         except Exception as e:
             logger.error("[event-mgr] Failed to start websocket: %s", e, exc_info=True)
 
+    @staticmethod
+    def _normalize_ws_event(event_data: Any) -> dict[str, Any]:
+        """Flatten a websocket message into the buffer's dict shape.
+
+        The client hands the handler a frozen ``WebsocketMessage`` carrying
+        ``event`` / ``event_object_id`` / ``door_id``. It has no ``type``,
+        ``id``, ``user_id`` or ``timestamp``, so reading those names off it
+        buffered ``{"type": "unknown", "door_id": ""}`` - a row that no
+        ``get_recent`` filter could match and that carried no time at all.
+        """
+        raw: dict[str, Any] = {}
+        if isinstance(event_data, dict):
+            raw = dict(event_data)
+        else:
+            # Prefer the model's own dump, but only when it really yields a
+            # mapping - `hasattr` alone is true for any mock or proxy object.
+            dump = getattr(event_data, "model_dump", None)
+            if callable(dump):
+                try:
+                    dumped = dump()
+                except Exception:  # pragma: no cover - defensive
+                    dumped = None
+                if isinstance(dumped, dict):
+                    raw = dict(dumped)
+            if not raw:
+                # Plain object: read both naming schemes, since callers may
+                # hand us either the websocket model or a legacy event object.
+                raw = {
+                    key: getattr(event_data, key, None)
+                    for key in ("id", "type", "door_id", "user_id", "timestamp", "event", "event_object_id")
+                }
+
+        normalized = dict(raw)
+        normalized["type"] = raw.get("type") or raw.get("event") or "unknown"
+        normalized["id"] = raw.get("id") or raw.get("event_object_id") or None
+        normalized["door_id"] = raw.get("door_id") or None
+        normalized["user_id"] = raw.get("user_id") or None
+        # Websocket messages are not timestamped by the controller; stamp on
+        # arrival so buffered rows can be ordered and aged like any other.
+        normalized["timestamp"] = raw.get("timestamp") or datetime.now(timezone.utc).isoformat()
+        return normalized
+
     def _on_event(self, event_data: Any) -> None:
         """Callback invoked for websocket events. Buffers the event."""
         try:
-            if isinstance(event_data, dict):
-                event_dict = event_data
-            else:
-                # Convert to dict if it's an object
-                event_dict = {
-                    "id": getattr(event_data, "id", None),
-                    "type": getattr(event_data, "type", "unknown"),
-                    "door_id": getattr(event_data, "door_id", None),
-                    "user_id": getattr(event_data, "user_id", None),
-                    "timestamp": getattr(event_data, "timestamp", None),
-                }
+            event_dict = self._normalize_ws_event(event_data)
             self._buffer.add(event_dict)
             logger.debug("[event-mgr] Buffered event from websocket")
             # Phase 4B: fan out to subscribers
@@ -228,8 +314,10 @@ class EventManager:
         Parameters
         ----------
         topic:
-            Event topic to query.  Valid values include ``admin`` and
-            ``admin_activity``.  The Access API requires this field.
+            Event topic to query. One of :data:`SYSTEM_LOG_TOPICS`, which
+            mirrors the Access UI's syslog Category filter. ``unlocks`` is the
+            door history (grants plus open/close), ``access_denial`` the
+            refused attempts. Anything else is rejected with ``no such topic``.
         start:
             ISO 8601 start time filter.
         end:
@@ -241,6 +329,13 @@ class EventManager:
         limit:
             Maximum number of events to return (page size).
         """
+        if topic not in SYSTEM_LOG_TOPICS:
+            raise ValueError(
+                f"Unsupported topic {topic!r}. The controller accepts only "
+                f"{', '.join(SYSTEM_LOG_TOPICS)}. Door unlock and open/close history "
+                "is under 'unlocks'; denied attempts are under 'access_denial'."
+            )
+
         if not self._cm.has_proxy:
             raise UniFiConnectionError("No proxy session available for list_events")
 
@@ -289,8 +384,9 @@ class EventManager:
             raise UniFiConnectionError("No proxy session available for get_event")
 
         try:
-            # Search across both known topics for the event
-            for topic in ("admin", "admin_activity"):
+            # Search every topic: an id surfaced by `unlocks`, `ring` or
+            # `access_denial` is invisible if only the admin pair is searched.
+            for topic in SYSTEM_LOG_TOPICS:
                 path = "insights/system_log/search?page_size=100&page_num=1&isAccess"
                 data = await self._cm.proxy_request("POST", path, json={"topic": topic})
                 inner = self._cm.extract_data(data)
@@ -330,7 +426,7 @@ class EventManager:
         try:
             now = int(time.time())
             since = now - (days * 86400)
-            path = f"activities/histogram?since={since}&until={now}&interval=3600"
+            path = f"activities/histogram?since={since}&until={now}&interval={_histogram_interval(days)}"
             if door_id:
                 path += f"&door_id={door_id}"
 

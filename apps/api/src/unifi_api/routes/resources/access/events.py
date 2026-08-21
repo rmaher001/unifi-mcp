@@ -19,6 +19,7 @@ capability-aware ``/events`` dispatcher (PR2) and protect's ``/events``
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from unifi_core.access.models.events import event_sort_key
 from unifi_core.exceptions import UniFiNotFoundError
 
 from unifi_api.auth.middleware import require_scope
@@ -33,12 +34,16 @@ router = APIRouter()
 
 
 def _event_key(obj) -> tuple:
-    """Sort by (timestamp, id) — newest first via the manifest's
-    ``sort_default = "timestamp:desc"``. paginate() sorts ascending; the
-    user-facing direction is captured in the serializer metadata.
+    """Sort by the canonical Access event key — newest first via the manifest's
+    ``sort_default = "timestamp:desc"``.
+
+    Uses the same key as the GraphQL resolver. Reading ``timestamp`` straight
+    off the raw row put a bare ``0`` next to a string for system-log rows,
+    which raises ``TypeError`` inside ``sorted()`` as soon as the two shapes
+    meet and takes ``GET /access/events`` down.
     """
     raw = obj if isinstance(obj, dict) else getattr(obj, "raw", {}) or {}
-    return (raw.get("timestamp") or raw.get("time") or 0, raw.get("id") or "")
+    return event_sort_key(raw)
 
 
 async def _maybe_set_site(cm, site_id: str) -> None:

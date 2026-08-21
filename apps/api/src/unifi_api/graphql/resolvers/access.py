@@ -27,6 +27,7 @@ from typing import Any
 
 import strawberry
 from strawberry.types import Info
+from unifi_core.access.models.events import event_sort_key
 
 from unifi_api.graphql.context import GraphQLContext
 from unifi_api.graphql.permissions import IsRead
@@ -84,17 +85,14 @@ def _id_key(obj: Any) -> tuple:
 
 
 def _event_key(obj: Any) -> tuple:
-    """Sort by (timestamp, id) — newest-first ordering is captured by the
-    REST routes; paginate() sorts ascending which is fine for cursor stability.
+    """Sort by the canonical Access event key.
+
+    Shared with the REST route and defined next to the model, because cursor
+    windowing only works if every surface agrees: system-log rows carry
+    ``published`` rather than ``timestamp`` and an empty ``id``, so the old
+    ``(raw["timestamp"], raw["id"])`` collapsed every row onto ``(0, "")``.
     """
-    raw = _raw(obj)
-    if isinstance(raw, dict):
-        ts = raw.get("timestamp") or raw.get("time") or 0
-        rid = raw.get("id") or ""
-    else:
-        ts = getattr(raw, "timestamp", None) or getattr(raw, "time", None) or 0
-        rid = getattr(raw, "id", None) or ""
-    return (int(ts or 0), str(rid))
+    return event_sort_key(_raw(obj))
 
 
 def _visitor_key(obj: Any) -> tuple:

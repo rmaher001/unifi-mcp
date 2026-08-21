@@ -127,7 +127,14 @@ async def access_get_event(
 async def access_recent_events(
     event_type: Annotated[
         Optional[str],
-        Field(description=("Filter by event type: door_open, door_close, access_granted, access_denied, door_alarm.")),
+        Field(
+            description=(
+                "Filter by event type, matched exactly against the controller's own dotted "
+                "event names as delivered over the websocket - e.g. 'access.door.unlock', "
+                "'access.dps.status.update', 'access.logs.add', 'access.hw.door_bell', "
+                "'access.data.device.remote_unlock'. Omit to return every buffered event."
+            )
+        ),
     ] = None,
     door_id: Annotated[
         Optional[str],

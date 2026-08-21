@@ -12,7 +12,6 @@ to ISO 8601 strings via ``_stringify_dt``. The ``top_users`` and
 
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -175,55 +174,3 @@ def activity_summary_from_controller(raw: Any) -> ActivitySummary:
         top_users=raw.get("top_users"),
         buckets=raw.get("buckets") or raw.get("histogram"),
     )
-
-
-def _sortable_millis(value: Any) -> int:
-    """Coerce an event time to sortable epoch milliseconds.
-
-    Access event times arrive in three shapes: ``published`` as epoch millis on
-    system-log rows, an ISO 8601 string once normalised, and a bare number on
-    legacy/websocket rows. A plain ``int()`` raises ``ValueError`` on the ISO
-    form, which is enough to take a whole events query down.
-    """
-    if value is None or isinstance(value, bool):
-        return 0
-    if isinstance(value, (int, float)):
-        return int(value)
-    text = str(value).strip()
-    if not text:
-        return 0
-    try:
-        return int(text)
-    except ValueError:
-        pass
-    try:
-        return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp() * 1000)
-    except ValueError:
-        return 0
-
-
-def event_sort_key(raw: Any) -> tuple[int, str]:
-    """Canonical ``(time, identity)`` ordering key for an Access event row.
-
-    Every surface must agree on this, because cursor pagination windows with a
-    strict ``(ts, id) < (last_ts, last_id)``: two rows sharing a key make the
-    next page drop both, and a key that differs between requests silently skips
-    or repeats rows.
-
-    System-log rows are why the identity is not simply ``id`` - they carry
-    ``id: ""``, so without a fallback every row of a page collapses onto the
-    same key and page 2 comes back empty. The fallback digests the fields that
-    actually distinguish a row, so it stays stable across requests.
-    """
-    published = _get(raw, "published")
-    ts = _sortable_millis(published) if published is not None else 0
-    if not ts:
-        ts = _sortable_millis(_get(raw, "timestamp") or _get(raw, "time"))
-
-    identity = _get(raw, "id") or ""
-    if not identity:
-        basis = "|".join(
-            str(_get(raw, key) or "") for key in ("published", "log_key", "event_type", "message", "result")
-        )
-        identity = hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
-    return (ts, str(identity))

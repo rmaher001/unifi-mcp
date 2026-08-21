@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from unifi_core.access.managers.connection_manager import AccessConnectionManager
-from unifi_core.access.managers.event_manager import EventBuffer, EventManager
+from unifi_core.access.managers.event_manager import SYSTEM_LOG_TOPICS, EventBuffer, EventManager
 from unifi_core.exceptions import UniFiConnectionError, UniFiNotFoundError
 
 # ---------------------------------------------------------------------------
@@ -225,7 +225,9 @@ class TestEventManagerREST:
         call_args = mock_req.call_args_list[0]
         assert call_args[0][0] == "POST"
         assert "insights/system_log/search" in call_args[0][1]
-        assert call_args[1]["json"]["topic"] == "admin"
+        # The search now covers every syslog category, not just the admin pair:
+        # an id under `unlocks` or `ring` was previously unreachable.
+        assert call_args[1]["json"]["topic"] == SYSTEM_LOG_TOPICS[0]
 
     @pytest.mark.asyncio
     async def test_get_event_not_found(self, event_mgr_proxy, cm_proxy):

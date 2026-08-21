@@ -38,7 +38,12 @@ async def access_list_events(
     topic: Annotated[
         str,
         Field(
-            description="Event topic to query: 'admin' (user/account changes) or 'admin_activity' (admin actions). Default: admin."
+            description=(
+                "Event topic, mirroring the Access UI's syslog Category filter: 'unlocks' "
+                "(door grants and open/close), 'access_denial' (refused attempts), 'ring' "
+                "(doorbell), 'updates', 'critical', 'admin' (user/account changes), "
+                "'admin_activity' (admin actions). No other value is accepted. Default: admin."
+            )
         ),
     ] = "admin",
     start: Annotated[

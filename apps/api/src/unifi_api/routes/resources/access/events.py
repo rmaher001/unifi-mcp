@@ -19,7 +19,6 @@ capability-aware ``/events`` dispatcher (PR2) and protect's ``/events``
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from unifi_core.access.models.events import event_sort_key
 from unifi_core.exceptions import UniFiNotFoundError
 
 from unifi_api.auth.middleware import require_scope
@@ -28,6 +27,7 @@ from unifi_api.routes.resources._common import (
     require_capability,
     resolve_controller,
 )
+from unifi_api.services.access_event_key import event_sort_key
 from unifi_api.services.pagination import Cursor, InvalidCursor, paginate
 
 router = APIRouter()
@@ -42,7 +42,15 @@ def _event_key(obj) -> tuple:
     which raises ``TypeError`` inside ``sorted()`` as soon as the two shapes
     meet and takes ``GET /access/events`` down.
     """
-    raw = obj if isinstance(obj, dict) else getattr(obj, "raw", {}) or {}
+    # Do NOT fall back to {}: that keyed every non-dict, non-.raw row to the
+    # same constant, so paginate()'s strict `<` window dropped all of them from
+    # page 2 - the exact collapse this key exists to prevent. Passing the object
+    # through lets event_sort_key read it via getattr, matching the GraphQL side.
+    raw = obj
+    if not isinstance(obj, dict):
+        wrapped = getattr(obj, "raw", None)
+        if isinstance(wrapped, dict):
+            raw = wrapped
     return event_sort_key(raw)
 
 

@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 from unifi_core.access.managers.event_manager import EventManager
+from unifi_core.exceptions import UniFiNotFoundError
 
 MAX_BUCKETS = 100
 
@@ -118,35 +119,10 @@ def test_the_largest_supported_window_still_works() -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_event_searches_every_topic_not_just_the_admin_pair() -> None:
-    """`get_event` searched only ("admin", "admin_activity"), so any id
-    surfaced by the newly reachable topics raised UniFiNotFoundError - the tool
-    was unusable for exactly the events this change exists to expose."""
-    from unifi_core.access.managers.event_manager import SYSTEM_LOG_TOPICS
-
-    mgr = _manager()
-    found = {"id": "evt-9", "event_type": "access.door.unlock"}
-
-    async def _search(method, path, json=None, **kw):
-        # Only the door-history topic holds it.
-        if json and json.get("topic") == "unlocks":
-            return {"data": {"events": [found]}}
-        return {"data": {"events": []}}
-
-    mgr._cm.proxy_request = AsyncMock(side_effect=_search)
-    mgr._cm.extract_data = MagicMock(side_effect=lambda d: d.get("data", {}))
-
-    assert await mgr.get_event("evt-9") == found
-    searched = {c.kwargs["json"]["topic"] for c in mgr._cm.proxy_request.call_args_list}
-    assert "unlocks" in searched, f"door history never searched; only {sorted(searched)}"
-    assert searched <= set(SYSTEM_LOG_TOPICS)
-
-
-@pytest.mark.asyncio
-async def test_get_event_exhausts_every_topic_before_giving_up() -> None:
-    from unifi_core.access.managers.event_manager import SYSTEM_LOG_TOPICS
-    from unifi_core.exceptions import UniFiNotFoundError
-
+async def test_get_event_does_not_fan_out_across_every_topic() -> None:
+    """Widening this loop to all seven topics was a regression: system-log rows
+    carry `id: ""`, so a caller-supplied id cannot match one however many
+    topics are searched - it only multiplied the cost of the same 404."""
     mgr = _manager()
     mgr._cm.proxy_request = AsyncMock(return_value={"data": {"events": []}})
     mgr._cm.extract_data = MagicMock(side_effect=lambda d: d.get("data", {}))
@@ -154,4 +130,31 @@ async def test_get_event_exhausts_every_topic_before_giving_up() -> None:
     with pytest.raises(UniFiNotFoundError):
         await mgr.get_event("nope")
     searched = {c.kwargs["json"]["topic"] for c in mgr._cm.proxy_request.call_args_list}
-    assert searched == set(SYSTEM_LOG_TOPICS), f"gave up after {sorted(searched)}"
+    assert searched == {"admin", "admin_activity"}, f"fanned out to {sorted(searched)}"
+
+
+@pytest.mark.asyncio
+async def test_get_event_still_finds_an_event_that_carries_a_real_id() -> None:
+    mgr = _manager()
+    found = {"id": "evt-9", "event_type": "access.admin.update"}
+
+    async def _search(method, path, json=None, **kw):
+        return {"data": {"events": [found] if json and json.get("topic") == "admin" else []}}
+
+    mgr._cm.proxy_request = AsyncMock(side_effect=_search)
+    mgr._cm.extract_data = MagicMock(side_effect=lambda d: d.get("data", {}))
+    assert await mgr.get_event("evt-9") == found
+
+
+def test_the_bucket_guard_agrees_with_its_own_advertised_limit() -> None:
+    """The controller counts ceil(span/interval); flooring let days=673 pass
+    and then request 97 buckets against a cap of 96."""
+    from unifi_core.access.managers.event_manager import (
+        _MAX_HISTOGRAM_BUCKETS,
+        _histogram_interval,
+    )
+
+    interval = _histogram_interval(672)
+    assert -(-672 * 86400 // interval) <= _MAX_HISTOGRAM_BUCKETS
+    with pytest.raises(ValueError):
+        _histogram_interval(673)

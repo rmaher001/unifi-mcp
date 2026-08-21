@@ -135,7 +135,10 @@ def _histogram_interval(days: int) -> int:
     """
     span = max(int(days), 1) * 86400
     for interval in _HISTOGRAM_INTERVALS:
-        if span // interval <= _MAX_HISTOGRAM_BUCKETS:
+        # Ceil, not floor: the controller sees ceil(span/interval) buckets, so
+        # flooring let days=673 pass the guard and then ask for 97 against a
+        # cap of 96, while the error text still claimed 672 was the limit.
+        if -(-span // interval) <= _MAX_HISTOGRAM_BUCKETS:
             return interval
     max_days = _MAX_HISTOGRAM_BUCKETS * _HISTOGRAM_INTERVALS[-1] // 86400
     raise ValueError(
@@ -143,6 +146,23 @@ def _histogram_interval(days: int) -> int:
         f"per week it exceeds the controller's histogram limit. "
         f"Request at most {max_days} days."
     )
+
+
+# Delivered by the "*" subscription but deliberately NOT buffered: these are
+# high-rate telemetry, and the ring holds only 100 entries. A burst of them
+# would evict a door unlock seconds after it happened, so
+# get_recent(event_type="access.door.unlock") would come back empty.
+_BUFFER_EXCLUDED_EVENTS: frozenset[str] = frozenset(
+    {
+        "access.data.v2.location.update",
+        "access.data.device.location_update_v2",
+        "access.data.location.update",
+        "access.data.v2.device.update",
+        "access.remote_view",
+        "access.remote_view.change",
+        "access.base.info",
+    }
+)
 
 
 class EventManager:
@@ -197,6 +217,9 @@ class EventManager:
             # none of them, so every message hit the client's "unhandled" branch
             # and the buffer stayed empty. ``"*"`` is the client's wildcard.
             handlers = {"*": self._on_event}
+            # NB: the wildcard also delivers high-rate telemetry frames. See
+            # _BUFFER_EXCLUDED_EVENTS - they are logged but not buffered, so a
+            # burst cannot evict a just-occurred door event from the ring.
             self._cm.start_websocket(handlers)
             logger.info("[event-mgr] Websocket subscription started.")
         except Exception as e:
@@ -234,7 +257,12 @@ class EventManager:
                     for key in ("id", "type", "door_id", "user_id", "timestamp", "event", "event_object_id")
                 }
 
-        normalized = dict(raw)
+        # Project to a known flat shape rather than carrying the whole dump.
+        # `model_dump()` includes the `data` sub-payload (actor display names,
+        # credential and device identifiers), and both `access_recent_events`
+        # and GET /access/recent-events return buffered rows unprojected - so
+        # keeping it would widen what a READ-scoped caller sees.
+        normalized: dict[str, Any] = {}
         normalized["type"] = raw.get("type") or raw.get("event") or "unknown"
         normalized["id"] = raw.get("id") or raw.get("event_object_id") or None
         normalized["door_id"] = raw.get("door_id") or None
@@ -248,6 +276,9 @@ class EventManager:
         """Callback invoked for websocket events. Buffers the event."""
         try:
             event_dict = self._normalize_ws_event(event_data)
+            if event_dict.get("type") in _BUFFER_EXCLUDED_EVENTS:
+                logger.debug("[event-mgr] Skipping high-rate frame %s", event_dict.get("type"))
+                return
             self._buffer.add(event_dict)
             logger.debug("[event-mgr] Buffered event from websocket")
             # Phase 4B: fan out to subscribers
@@ -384,9 +415,13 @@ class EventManager:
             raise UniFiConnectionError("No proxy session available for get_event")
 
         try:
-            # Search every topic: an id surfaced by `unlocks`, `ring` or
-            # `access_denial` is invisible if only the admin pair is searched.
-            for topic in SYSTEM_LOG_TOPICS:
+            # Deliberately NOT widened to all of SYSTEM_LOG_TOPICS. System-log
+            # rows carry `id: ""` (see the digest fallback in the API's sort
+            # key), so a caller-supplied id cannot match one however many
+            # topics are searched - widening only multiplied the cost of the
+            # same 404. Addressing those rows needs a stable synthetic
+            # identity, tracked separately.
+            for topic in ("admin", "admin_activity"):
                 path = "insights/system_log/search?page_size=100&page_num=1&isAccess"
                 data = await self._cm.proxy_request("POST", path, json={"topic": topic})
                 inner = self._cm.extract_data(data)
@@ -424,9 +459,14 @@ class EventManager:
             raise UniFiConnectionError("No proxy session available for get_activity_summary")
 
         try:
+            # Clamp once and use the clamped value for the window too: the MCP
+            # tool declares `days: int` with no bounds, so days=0 sent an empty
+            # window and days=-5 sent since > until, both slipping past the
+            # interval guard that had already judged the request servable.
+            window_days = max(int(days), 1)
             now = int(time.time())
-            since = now - (days * 86400)
-            path = f"activities/histogram?since={since}&until={now}&interval={_histogram_interval(days)}"
+            since = now - (window_days * 86400)
+            path = f"activities/histogram?since={since}&until={now}&interval={_histogram_interval(window_days)}"
             if door_id:
                 path += f"&door_id={door_id}"
 

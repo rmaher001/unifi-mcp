@@ -27,7 +27,6 @@ from typing import Any
 
 import strawberry
 from strawberry.types import Info
-from unifi_core.access.models.events import event_sort_key
 
 from unifi_api.graphql.context import GraphQLContext
 from unifi_api.graphql.permissions import IsRead
@@ -41,6 +40,7 @@ from unifi_api.graphql.types.access.schedules import Schedule
 from unifi_api.graphql.types.access.system import AccessHealth, AccessSystemInfo
 from unifi_api.graphql.types.access.users import User
 from unifi_api.graphql.types.access.visitors import Visitor
+from unifi_api.services.access_event_key import event_sort_key
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -87,7 +87,7 @@ def _id_key(obj: Any) -> tuple:
 def _event_key(obj: Any) -> tuple:
     """Sort by the canonical Access event key.
 
-    Shared with the REST route and defined next to the model, because cursor
+    Shared with the REST route and defined in ``unifi_api.services``, because cursor
     windowing only works if every surface agrees: system-log rows carry
     ``published`` rather than ``timestamp`` and an empty ``id``, so the old
     ``(raw["timestamp"], raw["id"])`` collapsed every row onto ``(0, "")``.

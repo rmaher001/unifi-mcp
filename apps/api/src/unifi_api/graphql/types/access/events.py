@@ -95,7 +95,15 @@ class Event:
         Normalising through the same function the MCP tool uses is what keeps
         all three surfaces agreeing on one shape.
         """
-        norm = event_from_controller(obj)
+        # Unwrap ``.raw`` first: this module's ``_get`` does, but the core
+        # helper's does not, so a wrapper object would otherwise normalise to
+        # an all-None row - silently, with no error.
+        source = obj
+        if not isinstance(obj, dict):
+            raw = getattr(obj, "raw", None)
+            if isinstance(raw, dict):
+                source = raw
+        norm = event_from_controller(source)
         inst = cls(
             id=norm.id,
             type=norm.type,
@@ -103,7 +111,11 @@ class Event:
             door_id=norm.door_id,
             user_id=norm.user_id,
             credential_id=norm.credential_id,
-            message=norm.message,
+            # Read ``message`` from the row rather than the model: the declared
+            # unifi-core floor has no ``message`` field, so ``norm.message``
+            # raises AttributeError and 500s every events request until a core
+            # release lands. The row carries it at every floor.
+            message=_get(source, "message"),
             result=norm.result,
         )
         inst._door_id = norm.door_id

@@ -87,3 +87,33 @@ def test_subscribers_receive_the_normalized_shape() -> None:
     mgr.add_subscriber(seen.append)
     mgr._on_event(WebsocketMessage(event="access.logs.add", event_object_id="evt-6", door_id="door-6"))
     assert seen and seen[0]["type"] == "access.logs.add"
+
+
+# --- what reaches the buffer --------------------------------------------------
+
+
+def test_the_data_subpayload_is_not_buffered() -> None:
+    """`access_recent_events` and GET /access/recent-events return buffered
+    rows unprojected, so carrying the whole model dump would put actor display
+    names and credential ids in front of any READ-scoped caller."""
+    mgr = _manager()
+    mgr._on_event(
+        WebsocketMessage(
+            event="access.logs.add",
+            event_object_id="e1",
+            data={"actor": {"display_name": "Test Person", "id": "user-1"}, "credential": {"id": "cred-1"}},
+        )
+    )
+    row = mgr.get_recent_from_buffer()[0]
+    assert "data" not in row, row
+    assert not any("cred-1" in str(v) for v in row.values()), row
+
+
+def test_high_rate_telemetry_does_not_evict_real_events() -> None:
+    """The wildcard also delivers location/remote-view frames. The ring holds
+    100 entries, so a burst would push out a just-occurred door unlock."""
+    mgr = _manager()
+    mgr._on_event(WebsocketMessage(event="access.door.unlock", event_object_id="unlock-1", door_id="door-1"))
+    for i in range(200):
+        mgr._on_event(WebsocketMessage(event="access.data.v2.location.update", event_object_id=f"loc-{i}"))
+    assert len(mgr.get_recent_from_buffer(event_type="access.door.unlock")) == 1

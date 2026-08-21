@@ -24,7 +24,6 @@ from typing import Any
 
 import strawberry
 from strawberry.types import Info
-from unifi_core.mac import mac_equal, normalize_mac
 
 from unifi_api.graphql.context import GraphQLContext
 from unifi_api.graphql.permissions import IsRead
@@ -206,7 +205,6 @@ async def _fetch_device_radio(
     site: str,
     mac: str,
 ) -> Any:
-    mac = normalize_mac(mac) or mac
     key = f"network/device-radio/{controller}/{site}/{mac}"
 
     async def _do() -> Any:
@@ -229,7 +227,6 @@ async def _fetch_lldp_neighbors(
     site: str,
     device_mac: str,
 ) -> Any:
-    device_mac = normalize_mac(device_mac) or device_mac
     key = f"network/lldp-neighbors/{controller}/{site}/{device_mac}"
 
     async def _do() -> Any:
@@ -252,7 +249,6 @@ async def _fetch_pdu_outlets(
     site: str,
     mac: str,
 ) -> Any:
-    mac = normalize_mac(mac) or mac
     key = f"network/pdu-outlets/{controller}/{site}/{mac}"
 
     async def _do() -> Any:
@@ -297,7 +293,6 @@ async def _fetch_rf_scan_results(
     site: str,
     ap_mac: str,
 ) -> list:
-    ap_mac = normalize_mac(ap_mac) or ap_mac
     key = f"network/rf-scan-results/{controller}/{site}/{ap_mac}"
 
     async def _do() -> list:
@@ -341,7 +336,6 @@ async def _fetch_speedtest_status(
     site: str,
     gateway_mac: str,
 ) -> Any:
-    gateway_mac = normalize_mac(gateway_mac) or gateway_mac
     key = f"network/speedtest-status/{controller}/{site}/{gateway_mac}"
 
     async def _do() -> Any:
@@ -935,7 +929,6 @@ async def _fetch_client_stats(
     mac: str,
     duration_hours: int,
 ) -> list:
-    mac = normalize_mac(mac) or mac
     key = f"network/client-stats/{controller}/{site}/{mac}/{duration_hours}"
     return await _stats_mgr_fetch(
         ctx,
@@ -955,7 +948,6 @@ async def _fetch_device_stats(
     mac: str,
     duration_hours: int,
 ) -> list:
-    mac = normalize_mac(mac) or mac
     key = f"network/device-stats/{controller}/{site}/{mac}/{duration_hours}"
     return await _stats_mgr_fetch(
         ctx,
@@ -974,7 +966,6 @@ async def _fetch_client_dpi_traffic(
     site: str,
     mac: str,
 ) -> list:
-    mac = normalize_mac(mac) or mac
     key = f"network/client-dpi-traffic/{controller}/{site}/{mac}"
     return await _stats_mgr_fetch(
         ctx,
@@ -1079,7 +1070,6 @@ async def _fetch_client_sessions(
     duration_hours: int,
 ) -> list:
     mac_part = mac or "all"
-    mac_part = normalize_mac(mac_part) or mac_part
     key = f"network/client-sessions/{controller}/{site}/{mac_part}/{duration_hours}"
     return await _stats_mgr_fetch(
         ctx,
@@ -1098,7 +1088,6 @@ async def _fetch_client_wifi_details(
     site: str,
     mac: str,
 ) -> Any:
-    mac = normalize_mac(mac) or mac
     key = f"network/client-wifi-details/{controller}/{site}/{mac}"
     return await _stats_mgr_fetch(
         ctx,
@@ -1380,7 +1369,6 @@ async def _fetch_switch_ports(
     site: str,
     device_mac: str,
 ) -> Any:
-    device_mac = normalize_mac(device_mac) or device_mac
     key = f"network/switch-ports/{controller}/{site}/{device_mac}"
 
     async def _do() -> Any:
@@ -1403,7 +1391,6 @@ async def _fetch_port_stats(
     site: str,
     device_mac: str,
 ) -> Any:
-    device_mac = normalize_mac(device_mac) or device_mac
     key = f"network/port-stats/{controller}/{site}/{device_mac}"
 
     async def _do() -> Any:
@@ -1426,7 +1413,6 @@ async def _fetch_switch_capabilities(
     site: str,
     device_mac: str,
 ) -> Any:
-    device_mac = normalize_mac(device_mac) or device_mac
     key = f"network/switch-capabilities/{controller}/{site}/{device_mac}"
 
     async def _do() -> Any:
@@ -1942,7 +1928,7 @@ class NetworkQuery:
         for c in raw:
             r = _raw(c)
             c_mac = r.get("mac") if isinstance(r, dict) else getattr(r, "mac", None)
-            if mac_equal(c_mac, mac):
+            if c_mac == mac:
                 inst = Client.from_manager_output(c)
                 inst._controller_id = controller
                 inst._site = site
@@ -2048,7 +2034,7 @@ class NetworkQuery:
         for d in raw:
             r = _raw(d)
             d_mac = r.get("mac") if isinstance(r, dict) else getattr(r, "mac", None)
-            if mac_equal(d_mac, mac):
+            if d_mac == mac:
                 inst = Device.from_manager_output(d)
                 inst._controller_id = controller
                 inst._site = site

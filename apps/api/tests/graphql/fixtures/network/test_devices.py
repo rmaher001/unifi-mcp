@@ -336,6 +336,10 @@ async def test_devices_carry_system_stats_and_temperature(tmp_path, monkeypatch)
                     "model": "UCGFIBER",
                     "system-stats": {"cpu": "7.4", "mem": "38.1", "uptime": "86400"},
                     "general_temperature": 52,
+                    "temperatures": [
+                        {"name": "CPU", "type": "cpu", "value": 67.3},
+                        {"name": "PMIC", "type": "board", "value": 70.4},
+                    ],
                 },
                 {
                     "mac": "sw:01",

@@ -42,6 +42,17 @@ _STATE_MAP = {
 }
 
 
+def _float_or_none(value: Any) -> float | None:
+    """The controller reports temperatures as numbers or numeric strings; anything
+    else (absent, empty, a placeholder) is simply unknown."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _get(obj: Any, key: str, default: Any = None) -> Any:
     if isinstance(obj, dict):
         return obj.get(key, default)
@@ -62,6 +73,14 @@ class Device:
     state: str | None
     ip: str | None
     ports: strawberry.scalars.JSON | None  # type: ignore[name-defined]
+    # Health, straight from the controller's device object. The controller
+    # spells it `system-stats` (hyphen): {"cpu": "12.3", "mem": "45.6",
+    # "uptime": "..."} - strings, percentages - and we expose it as
+    # `system_stats`; `general_temperature` is the board temperature in degrees
+    # Celsius - present on gateways, most switches and some APs, absent on the
+    # rest.
+    system_stats: strawberry.scalars.JSON | None  # type: ignore[name-defined]
+    general_temperature: float | None
 
     source_api: str | None = None
     integration_id: strawberry.ID | None = strawberry.field(
@@ -104,6 +123,8 @@ class Device:
             else _STATE_MAP.get(state_raw, state_raw),
             ip=raw.get("ip"),
             ports=raw.get("port_table") or raw.get("ports"),
+            system_stats=raw.get("system-stats") if "system-stats" in raw else raw.get("system_stats"),
+            general_temperature=_float_or_none(raw.get("general_temperature")),
         )
 
     def to_dict(self) -> dict:

@@ -315,3 +315,52 @@ async def test_pdu_outlets(tmp_path, monkeypatch):
     assert pdu["mac"] == "ac:8b:a9:11:22:33"
     assert pdu["outlets"][0]["index"] == 1
     assert pdu["outlets"][0]["relayState"] is True
+
+
+@pytest.mark.asyncio
+async def test_devices_carry_system_stats_and_temperature(tmp_path, monkeypatch):
+    """The controller's `system-stats` (hyphen; cpu/mem/uptime as strings) is
+    exposed as `system_stats` unchanged, and `general_temperature` rides
+    through as a float; a device without them reports null for both, and a
+    non-numeric temperature is null rather than an error. The switch case uses
+    the underscore spelling some fixtures and read views already produce."""
+    monkeypatch.setenv("UNIFI_API_DB_KEY", "k")
+    app, key, cid = await bootstrap(tmp_path, product="network")
+    stub_managers(
+        monkeypatch,
+        {
+            ("network", "device_manager", "get_devices"): [
+                {
+                    "mac": "gw:01",
+                    "name": "Gateway",
+                    "model": "UCGFIBER",
+                    "system-stats": {"cpu": "7.4", "mem": "38.1", "uptime": "86400"},
+                    "general_temperature": 52,
+                },
+                {
+                    "mac": "sw:01",
+                    "name": "Switch",
+                    "model": "USWPROXG8",
+                    "system_stats": {"cpu": "3.0", "mem": "21.9"},
+                    "general_temperature": "61.5",
+                },
+                {"mac": "ap:01", "name": "AP", "model": "U7PRO", "general_temperature": "n/a"},
+            ],
+        },
+    )
+    body = await graphql_query(
+        app,
+        key,
+        f'''{{
+        network {{ devices(controller: "{cid}", limit: 10) {{
+            items {{ mac systemStats generalTemperature }}
+        }} }}
+    }}''',
+    )
+    assert body.get("errors") is None, body
+    by_mac = {d["mac"]: d for d in body["data"]["network"]["devices"]["items"]}
+    assert by_mac["gw:01"]["systemStats"] == {"cpu": "7.4", "mem": "38.1", "uptime": "86400"}
+    assert by_mac["gw:01"]["generalTemperature"] == 52.0
+    assert by_mac["sw:01"]["generalTemperature"] == 61.5
+    assert by_mac["ap:01"]["systemStats"] is None
+    assert by_mac["ap:01"]["generalTemperature"] is None

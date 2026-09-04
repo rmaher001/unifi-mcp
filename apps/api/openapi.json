@@ -2177,6 +2177,15 @@
             ],
             "title": "System Stats"
           },
+          "temperatures": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temperatures"
+          },
           "type": {
             "anyOf": [
               {

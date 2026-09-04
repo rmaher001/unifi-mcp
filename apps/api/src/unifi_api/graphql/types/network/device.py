@@ -81,6 +81,10 @@ class Device:
     # rest.
     system_stats: strawberry.scalars.JSON | None  # type: ignore[name-defined]
     general_temperature: float | None
+    # Gateways report no general_temperature; their sensors come as
+    # `temperatures`: [{"name": "CPU", "type": "cpu", "value": 67.3}, ...]
+    # (degrees Celsius), passed through as the controller sends them.
+    temperatures: strawberry.scalars.JSON | None  # type: ignore[name-defined]
 
     source_api: str | None = None
     integration_id: strawberry.ID | None = strawberry.field(
@@ -125,6 +129,7 @@ class Device:
             ports=raw.get("port_table") or raw.get("ports"),
             system_stats=raw.get("system-stats") if "system-stats" in raw else raw.get("system_stats"),
             general_temperature=_float_or_none(raw.get("general_temperature")),
+            temperatures=raw.get("temperatures") if isinstance(raw.get("temperatures"), list) else None,
         )
 
     def to_dict(self) -> dict:

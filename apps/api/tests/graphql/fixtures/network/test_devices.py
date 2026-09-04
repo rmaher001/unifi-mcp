@@ -353,7 +353,7 @@ async def test_devices_carry_system_stats_and_temperature(tmp_path, monkeypatch)
         key,
         f'''{{
         network {{ devices(controller: "{cid}", limit: 10) {{
-            items {{ mac systemStats generalTemperature }}
+            items {{ mac systemStats generalTemperature temperatures }}
         }} }}
     }}''',
     )
@@ -361,6 +361,11 @@ async def test_devices_carry_system_stats_and_temperature(tmp_path, monkeypatch)
     by_mac = {d["mac"]: d for d in body["data"]["network"]["devices"]["items"]}
     assert by_mac["gw:01"]["systemStats"] == {"cpu": "7.4", "mem": "38.1", "uptime": "86400"}
     assert by_mac["gw:01"]["generalTemperature"] == 52.0
+    assert by_mac["gw:01"]["temperatures"] == [
+        {"name": "CPU", "type": "cpu", "value": 67.3},
+        {"name": "PMIC", "type": "board", "value": 70.4},
+    ]
+    assert by_mac["sw:01"]["temperatures"] is None
     assert by_mac["sw:01"]["generalTemperature"] == 61.5
     assert by_mac["ap:01"]["systemStats"] is None
     assert by_mac["ap:01"]["generalTemperature"] is None

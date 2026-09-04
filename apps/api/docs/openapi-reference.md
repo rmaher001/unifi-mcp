@@ -154,6 +154,7 @@ DoorManager.get_door_status raises UniFiNotFoundError on miss → 404.
 - `site_id` (path) (required)
 - `limit` (query)
 - `cursor` (query)
+- `topic` (query)
 - `controller` (query)
 
 
@@ -747,6 +748,20 @@ Returns the user-defined firewall policy ordering for a source/destination zone 
 **Returns:** `object`
 
 
+## network/mgmt
+
+### `GET /v1/sites/{site_id}/mgmt-settings` — Get Mgmt Settings
+
+
+**Parameters:**
+
+- `site_id` (path) (required)
+- `controller` (query)
+
+
+**Returns:** `object`
+
+
 ## network/networks
 
 ### `GET /v1/sites/{site_id}/networks` — List Networks
@@ -1277,7 +1292,7 @@ DETAIL kind currently; manager method is stats_manager.get_dpi_stats.
 ### `GET /v1/sites/{site_id}/event-types` — Get Event Types
 
 
-DETAIL — event_manager.get_event_type_prefixes (sync method, returns list).
+DETAIL — event_manager.get_event_types (async method, returns list).
 
 
 **Parameters:**
@@ -1906,6 +1921,9 @@ No native ``protect_get_sensor`` tool exists — filter from LIST.
 ## protect/system
 
 ### `GET /v1/sites/{site_id}/alarm-profiles` — Alarm List Profiles
+
+
+List configured alarm profiles, including each profile's state and state_set_at timestamp. Alarm Manager v2 profile IDs are scoped to this read family; use arm_compatible to determine whether a profile can be passed to legacy arm actions.
 
 
 **Parameters:**

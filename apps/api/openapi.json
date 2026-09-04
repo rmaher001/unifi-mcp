@@ -2001,6 +2001,17 @@
       "DeviceModel": {
         "additionalProperties": true,
         "properties": {
+          "general_temperature": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "General Temperature"
+          },
           "integration_id": {
             "anyOf": [
               {
@@ -2087,6 +2098,15 @@
               }
             ],
             "title": "State"
+          },
+          "system_stats": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Stats"
           },
           "type": {
             "anyOf": [

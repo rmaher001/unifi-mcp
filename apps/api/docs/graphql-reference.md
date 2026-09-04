@@ -565,6 +565,8 @@ type Device {
   state: String
   ip: String
   ports: JSON
+  systemStats: JSON
+  generalTemperature: Float
   sourceApi: String
 
   """

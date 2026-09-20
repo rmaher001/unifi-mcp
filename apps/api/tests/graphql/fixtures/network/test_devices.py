@@ -373,3 +373,46 @@ async def test_devices_carry_system_stats_and_temperature(tmp_path, monkeypatch)
     assert by_mac["sw:01"]["generalTemperature"] == 61.5
     assert by_mac["ap:01"]["systemStats"] is None
     assert by_mac["ap:01"]["generalTemperature"] is None
+
+
+@pytest.mark.asyncio
+async def test_devices_carry_uptime_stats(tmp_path, monkeypatch):
+    """The gateway's uplink monitors - the numbers behind the app's WAN
+    latency line - ride through as `uptime_stats` unchanged: per WAN key a
+    list of monitors with target, type, availability and latency_average.
+    A device without them reports null; a non-object value is null too."""
+    monkeypatch.setenv("UNIFI_API_DB_KEY", "k")
+    app, key, cid = await bootstrap(tmp_path, product="network")
+    monitors = {
+        "WAN": {
+            "monitors": [
+                {"target": "www.google.com", "type": "dns", "availability": 100.0, "latency_average": 13},
+                {"target": "1.1.1.1", "type": "icmp", "availability": 99.9, "latency_average": 12},
+            ]
+        },
+        "WAN2": {"monitors": [{"target": "www.google.com", "type": "dns", "availability": 0.0}]},
+    }
+    stub_managers(
+        monkeypatch,
+        {
+            ("network", "device_manager", "get_devices"): [
+                {"mac": "gw:01", "name": "Gateway", "model": "UCGFIBER", "uptime_stats": monitors},
+                {"mac": "sw:01", "name": "Switch", "model": "USWPROXG8"},
+                {"mac": "ap:01", "name": "AP", "model": "U7PRO", "uptime_stats": "n/a"},
+            ],
+        },
+    )
+    body = await graphql_query(
+        app,
+        key,
+        f'''{{
+        network {{ devices(controller: "{cid}", limit: 10) {{
+            items {{ mac uptimeStats }}
+        }} }}
+    }}''',
+    )
+    assert body.get("errors") is None, body
+    by_mac = {d["mac"]: d for d in body["data"]["network"]["devices"]["items"]}
+    assert by_mac["gw:01"]["uptimeStats"] == monitors
+    assert by_mac["sw:01"]["uptimeStats"] is None
+    assert by_mac["ap:01"]["uptimeStats"] is None

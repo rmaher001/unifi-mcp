@@ -85,6 +85,11 @@ class Device:
     # `temperatures`: [{"name": "CPU", "type": "cpu", "value": 67.3}, ...]
     # (degrees Celsius), passed through as the controller sends them.
     temperatures: strawberry.scalars.JSON | None  # type: ignore[name-defined]
+    # The gateway's uplink monitors - the numbers behind the app's WAN
+    # "Latency" line: {"WAN": {"monitors": [{"target", "type", "availability",
+    # "latency_average"}, ...]}, "WAN2": {...}} - passed through as the
+    # controller sends them; null on devices without them.
+    uptime_stats: strawberry.scalars.JSON | None  # type: ignore[name-defined]
 
     # Context for relationship edges — NOT in SDL, NOT in to_dict().
     _controller_id: strawberry.Private[str | None] = None
@@ -116,6 +121,7 @@ class Device:
             system_stats=raw.get("system-stats") if "system-stats" in raw else raw.get("system_stats"),
             general_temperature=_float_or_none(raw.get("general_temperature")),
             temperatures=raw.get("temperatures") if isinstance(raw.get("temperatures"), list) else None,
+            uptime_stats=raw.get("uptime_stats") if isinstance(raw.get("uptime_stats"), dict) else None,
         )
 
     def to_dict(self) -> dict:

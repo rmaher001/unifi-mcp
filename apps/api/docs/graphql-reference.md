@@ -574,6 +574,7 @@ type Device {
   systemStats: JSON
   generalTemperature: Float
   temperatures: JSON
+  uptimeStats: JSON
   sourceApi: String
 
   """

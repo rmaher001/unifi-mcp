@@ -2139,6 +2139,15 @@
             ],
             "title": "Uptime"
           },
+          "uptime_stats": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime Stats"
+          },
           "version": {
             "anyOf": [
               {

@@ -325,6 +325,12 @@ class TestLegacyTrafficRouteSafety:
         assert mock_connection.request.await_count == 2
 
 
+def test_runtime_reuses_cached_traffic_route_manager_for_firewall_compatibility() -> None:
+    from unifi_network_mcp import runtime
+
+    assert runtime.firewall_manager._traffic_route_manager is runtime.traffic_route_manager
+
+
 # ---------------------------------------------------------------------------
 # update_firewall_policy — endpoint and merge tests
 # ---------------------------------------------------------------------------

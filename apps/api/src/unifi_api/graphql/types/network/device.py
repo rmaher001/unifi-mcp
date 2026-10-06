@@ -35,11 +35,14 @@ _STATE_MAP = {
     0: "disconnected",
     1: "connected",
     2: "pending",
+    3: "firmware-mismatch",
     4: "upgrading",
     5: "provisioning",
     6: "heartbeat-missed",
     7: "adopting",
+    8: "deleting",
     9: "adoption-error",
+    10: "adoption-failed",
     11: "isolated",
 }
 
@@ -121,7 +124,7 @@ class Device:
             uptime=raw.get("uptime"),
             state=raw.get("public_state")
             if raw.get("source_api") == "integration"
-            else _STATE_MAP.get(state_raw, state_raw),
+            else _STATE_MAP.get(state_raw, None if state_raw is None else str(state_raw)),
             ip=raw.get("ip"),
             ports=raw.get("port_table") or raw.get("ports"),
             system_stats=redact_sensitive_fields(stats, redact_sensitive=redact_sensitive)

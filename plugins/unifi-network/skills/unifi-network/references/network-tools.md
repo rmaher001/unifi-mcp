@@ -82,7 +82,7 @@ Always available, regardless of registration mode.
 | `unifi_get_rf_scan_results` | Read | Get RF spectrum scan results for an access point. |
 | `unifi_get_speedtest_status` | Read | Check the status of a running speedtest on the gateway. |
 | `unifi_list_available_channels` | Read | List allowed RF channels for the site's regulatory domain. |
-| `unifi_list_devices` | Read | Returns adopted device inventory with MAC, name, model, IP, firmware version, uptime, status (online/offline/upgrading/etc), device_categ... |
+| `unifi_list_devices` | Read | Returns adopted device inventory with MAC, name, model, IP (a gateway's lan_ip is its LAN management address), firmware version, uptime, ... |
 | `unifi_list_rogue_aps` | Read | List neighboring/rogue APs detected by your access points. |
 | `unifi_adopt_device` | Mutate | Adopt a pending device into the Unifi Network by MAC address |
 | `unifi_force_provision_device` | Mutate | Force re-provision a device, pushing the current configuration from the controller to the device. |

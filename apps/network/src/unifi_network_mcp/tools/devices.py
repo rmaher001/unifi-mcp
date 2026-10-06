@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
     name="unifi_list_devices",
     auth="either",
     description=(
-        "Returns adopted device inventory with MAC, name, model, IP, firmware version, "
+        "Returns adopted device inventory with MAC, name, model, IP (a gateway's lan_ip is its LAN management address), firmware version, "
         "uptime, status (online/offline/upgrading/etc), device_category (ap/switch/gateway/pdu), "
         "upgradable flag, connection_network, uplink topology, load_avg, mem_pct, and model_eol. "
         "Filter by device_type (ap/switch/gateway/pdu) and status (online/offline/pending/upgrading). "

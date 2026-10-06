@@ -286,6 +286,21 @@ def shape_client_details(
     return response
 
 
+def gateway_lan_ip(device: dict[str, Any]) -> str | None:
+    """Return a gateway's LAN management address.
+
+    ``ip`` on a gateway is its WAN-facing address. The management address the
+    LAN reaches it on is ``lan_ip`` when the controller reports it, else the
+    ``config_network`` block's ``ip``. Non-gateways and gateways that report
+    neither return ``None``.
+    """
+    if device.get("source_api") == "integration" or classify_device(device) != "gateway":
+        return None
+    config_network = device.get("config_network")
+    fallback = config_network.get("ip") if isinstance(config_network, dict) else None
+    return device.get("lan_ip") or fallback or None
+
+
 def _device_base(device: dict[str, Any]) -> dict[str, Any]:
     if device.get("source_api") == "integration":
         return {
@@ -339,7 +354,7 @@ def _device_base(device: dict[str, Any]) -> dict[str, Any]:
             "uplink_device": uplink.get("uplink_device_name"),
             "uplink_port": uplink.get("uplink_remote_port"),
         }
-    return {
+    base = {
         "mac": device.get("mac", ""),
         "name": device.get("name", device.get("model", "Unknown")),
         "model": device.get("model", ""),
@@ -361,6 +376,10 @@ def _device_base(device: dict[str, Any]) -> dict[str, Any]:
         "model_eol": device.get("model_in_eol", False),
         "_id": device.get("_id", ""),
     }
+    lan_ip = gateway_lan_ip(device)
+    if lan_ip:
+        base["lan_ip"] = lan_ip
+    return base
 
 
 def _add_device_details(device: dict[str, Any], target: dict[str, Any], *, summary: bool) -> None:
@@ -575,6 +594,9 @@ def shape_device_details(
                 "adopted": raw.get("adopted", False),
             }
         )
+        lan_ip = gateway_lan_ip(raw)
+        if lan_ip:
+            data["lan_ip"] = lan_ip
     if (include_all or "ports" in sections) and "port_table" in raw:
         lldp_by_port = {
             entry["local_port_idx"]: {

@@ -644,3 +644,46 @@ def test_device_projection_preserves_public_inventory_provenance_and_unknown_val
     assert result["devices"] == [{"mac": "aa", "uptime": None}]
     assert result["_meta"]["source_api"] == "integration"
     assert result["_meta"]["complete"] is False
+
+
+def _gateway(**extra):
+    return {"mac": "aa", "name": "GW", "type": "udm", "state": 1, "ip": "203.0.113.5", **extra}
+
+
+def test_gateway_list_summary_carries_lan_management_ip() -> None:
+    gateway = _gateway(lan_ip="192.168.1.1")
+    switch = {"mac": "bb", "name": "SW", "type": "usw", "state": 1}
+
+    result = shape_device_list([gateway, switch], site="default")
+    by_name = {d["name"]: d for d in result["devices"]}
+
+    assert by_name["GW"]["ip"] == "203.0.113.5"
+    assert by_name["GW"]["lan_ip"] == "192.168.1.1"
+    assert "lan_ip" not in by_name["SW"]
+
+
+def test_gateway_lan_ip_falls_back_to_config_network_ip() -> None:
+    gateway = _gateway(config_network={"type": "static", "ip": "192.168.1.1"})
+
+    result = shape_device_list([gateway], site="default")
+
+    assert result["devices"][0]["lan_ip"] == "192.168.1.1"
+
+
+def test_gateway_without_lan_address_omits_the_key() -> None:
+    result = shape_device_list([_gateway()], site="default")
+
+    assert "lan_ip" not in result["devices"][0]
+
+
+def test_gateway_details_summary_basic_carries_lan_management_ip() -> None:
+    result = shape_device_details(
+        SimpleNamespace(raw=_gateway(lan_ip="192.168.1.1")),
+        site="default",
+        mac_address="aa",
+        include="basic",
+        summary=True,
+    )
+
+    assert result["device"]["ip"] == "203.0.113.5"
+    assert result["device"]["lan_ip"] == "192.168.1.1"

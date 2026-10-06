@@ -1229,6 +1229,8 @@ type Network {
   wanSla: String
   reportWanEvent: Boolean
   wanSmartqEnabled: Boolean
+  wanSmartqUpRate: Int
+  wanSmartqDownRate: Int
   wanVlanEnabled: Boolean
   igmpProxyUpstream: Boolean
   igmpProxyFor: JSON

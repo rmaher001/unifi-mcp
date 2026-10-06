@@ -96,6 +96,8 @@ class Network:
     wan_sla: str | None = strawberry.field(description="Controller WAN-SLA configuration ID for this uplink.")
     report_wan_event: bool | None
     wan_smartq_enabled: bool | None
+    wan_smartq_up_rate: int | None
+    wan_smartq_down_rate: int | None
     wan_vlan_enabled: bool | None
     igmp_proxy_upstream: bool | None
     igmp_proxy_for: strawberry.scalars.JSON | None  # type: ignore[name-defined]
@@ -214,6 +216,8 @@ class Network:
             wan_sla=raw.get("wan_sla"),
             report_wan_event=raw.get("report_wan_event"),
             wan_smartq_enabled=raw.get("wan_smartq_enabled"),
+            wan_smartq_up_rate=raw.get("wan_smartq_up_rate"),
+            wan_smartq_down_rate=raw.get("wan_smartq_down_rate"),
             wan_vlan_enabled=raw.get("wan_vlan_enabled"),
             igmp_proxy_upstream=raw.get("igmp_proxy_upstream"),
             igmp_proxy_for=raw.get("igmp_proxy_for"),

@@ -5650,6 +5650,17 @@
             "description": "Controller WAN-SLA configuration ID for this uplink.",
             "title": "Wan Sla"
           },
+          "wan_smartq_down_rate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wan Smartq Down Rate"
+          },
           "wan_smartq_enabled": {
             "anyOf": [
               {
@@ -5660,6 +5671,17 @@
               }
             ],
             "title": "Wan Smartq Enabled"
+          },
+          "wan_smartq_up_rate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wan Smartq Up Rate"
           },
           "wan_type": {
             "anyOf": [

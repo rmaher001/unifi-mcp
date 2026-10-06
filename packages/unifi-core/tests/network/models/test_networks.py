@@ -53,6 +53,8 @@ class TestFieldSets:
             "wan_sla",
             "report_wan_event",
             "wan_smartq_enabled",
+            "wan_smartq_up_rate",
+            "wan_smartq_down_rate",
             "wan_vlan_enabled",
             "igmp_proxy_upstream",
             "igmp_proxy_for",
@@ -181,6 +183,8 @@ class TestFromController:
             "wan_sla": "sla-1",
             "report_wan_event": False,
             "wan_smartq_enabled": False,
+            "wan_smartq_up_rate": 50000,
+            "wan_smartq_down_rate": 900000,
             "wan_vlan_enabled": False,
             "igmp_proxy_upstream": False,
             "igmp_proxy_for": "none",
@@ -199,6 +203,8 @@ class TestFromController:
         assert n.wan_sla == "sla-1"
         assert n.report_wan_event is False
         assert n.wan_smartq_enabled is False
+        assert n.wan_smartq_up_rate == 50000
+        assert n.wan_smartq_down_rate == 900000
         assert n.wan_vlan_enabled is False
         assert n.igmp_proxy_upstream is False
         # 'none' (string) when disabled; field is Optional[Any] so a configured
@@ -345,6 +351,8 @@ class TestStrictValidation:
         [
             ("wan_vlan_enabled", "yes"),
             ("wan_smartq_enabled", "false"),
+            ("wan_smartq_up_rate", "50000"),
+            ("wan_smartq_down_rate", 1.5),
             ("wan_failover_priority", 1.0),
             ("vlan", True),
         ],
@@ -487,6 +495,12 @@ class TestToControllerUpdate:
         assert result["wan_dns2"] == "8.8.8.8"
         assert result["wan_load_balance_weight"] == 50
         assert result["igmp_proxy_for"] == "none"
+
+    def test_wan_smartq_rates_passthrough(self) -> None:
+        result = to_controller_update(
+            {"wan_smartq_enabled": True, "wan_smartq_up_rate": 50000, "wan_smartq_down_rate": 900000}
+        )
+        assert result == {"wan_smartq_enabled": True, "wan_smartq_up_rate": 50000, "wan_smartq_down_rate": 900000}
 
     def test_wan_bool_false_preserved(self) -> None:
         # Disabling a WAN feature (False) must survive the update filter (v is not None).

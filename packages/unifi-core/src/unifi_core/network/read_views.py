@@ -803,6 +803,8 @@ def shape_network_details(
             "wan_load_balance_weight",
             "wan_failover_priority",
             "wan_smartq_enabled",
+            "wan_smartq_up_rate",
+            "wan_smartq_down_rate",
             "wan_vlan_enabled",
             "igmp_proxy_upstream",
             "igmp_proxy_for",

@@ -289,7 +289,8 @@ VPN_FIREWALL_ZONE_WARNING = (
     "wan_dns1 (IPv4, required for manual DNS), wan_dns2 (IPv4), "
     "wan_load_balance_type ('failover-only'/'weighted'), wan_load_balance_weight (int 0-100), "
     "wan_failover_priority (int), wan_sla (str, controller WAN-SLA configuration ID), "
-    "report_wan_event (bool), wan_smartq_enabled (bool), wan_vlan_enabled (bool), "
+    "report_wan_event (bool), wan_smartq_enabled (bool), wan_smartq_up_rate (int kbps), "
+    "wan_smartq_down_rate (int kbps), wan_vlan_enabled (bool), "
     "igmp_proxy_upstream (bool), igmp_proxy_for (JSON: 'none' or list of network refs), "
     "mac_override_enabled (bool), wan_ip_aliases (list). "
     "WAN IPv6 (dual-stack; does not affect IPv4 internet): ipv6_enabled (bool), wan_type_v6 (str), "
@@ -386,6 +387,8 @@ async def update_network(
             - wan_load_balance_weight (integer): Load-balance weight (0-100, used when 'weighted').
             - wan_failover_priority (integer): Failover priority (lower = higher priority).
             - wan_smartq_enabled (boolean): Enable Smart Queues (QoS/bufferbloat) on the WAN.
+            - wan_smartq_up_rate (integer): Smart Queues upload ceiling in kbps.
+            - wan_smartq_down_rate (integer): Smart Queues download ceiling in kbps.
             - wan_vlan_enabled (boolean): Enable VLAN tagging on the WAN uplink.
             - igmp_proxy_upstream (boolean): Enable IGMP proxy on this WAN (IPTV multicast).
             - igmp_proxy_for (JSON): IGMP proxy downstream scope ('none' or list of network refs).

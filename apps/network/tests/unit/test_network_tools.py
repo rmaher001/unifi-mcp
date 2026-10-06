@@ -367,6 +367,23 @@ class TestUpdateNetworkWanFields:
         assert forwarded == {"wan_smartq_enabled": True}
 
     @pytest.mark.asyncio
+    async def test_smartq_rates_are_accepted_and_forwarded(self):
+        fields = {"wan_smartq_enabled": True, "wan_smartq_up_rate": 50000, "wan_smartq_down_rate": 900000}
+        updated = {**SAMPLE_WAN, **fields}
+        with patch("unifi_network_mcp.tools.network.network_manager") as mock_mgr:
+            mock_mgr.get_network_details = AsyncMock(side_effect=[SAMPLE_WAN, updated])
+            mock_mgr.update_network = AsyncMock(
+                return_value=verify_write(operation="update", requested=fields, before=SAMPLE_WAN, after=updated)
+            )
+
+            from unifi_network_mcp.tools.network import update_network
+
+            result = await update_network(network_id="wan001", update_data=dict(fields), confirm=True)
+
+        assert result["success"] is True
+        assert mock_mgr.update_network.call_args[0][1] == fields
+
+    @pytest.mark.asyncio
     async def test_confirmed_update_forwards_firewall_zone_and_wan_monitor_fields(self):
         fields = {
             "firewall_zone_id": "zone-v2-1",

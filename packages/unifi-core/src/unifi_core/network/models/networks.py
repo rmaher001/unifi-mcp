@@ -309,6 +309,14 @@ class Network(BaseModel):
         default=None,
         description="Enable Smart Queues (QoS / bufferbloat shaping) on this WAN",
     )
+    wan_smartq_up_rate: Optional[int] = Field(
+        default=None,
+        description="Smart Queues upload ceiling in kbps (used when Smart Queues is enabled)",
+    )
+    wan_smartq_down_rate: Optional[int] = Field(
+        default=None,
+        description="Smart Queues download ceiling in kbps (used when Smart Queues is enabled)",
+    )
     wan_vlan_enabled: Optional[bool] = Field(
         default=None,
         description="Enable VLAN tagging on the WAN uplink (some ISPs require it)",
@@ -531,6 +539,8 @@ def from_controller(raw: Any) -> Network:
         wan_sla=_get(raw, "wan_sla"),
         report_wan_event=_get(raw, "report_wan_event"),
         wan_smartq_enabled=_get(raw, "wan_smartq_enabled"),
+        wan_smartq_up_rate=_get(raw, "wan_smartq_up_rate"),
+        wan_smartq_down_rate=_get(raw, "wan_smartq_down_rate"),
         wan_vlan_enabled=_get(raw, "wan_vlan_enabled"),
         igmp_proxy_upstream=_get(raw, "igmp_proxy_upstream"),
         igmp_proxy_for=_get(raw, "igmp_proxy_for"),

@@ -8,7 +8,7 @@ here cover the read shape returned by `protect_list_recordings` and
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -33,11 +33,11 @@ class Recording(BaseModel):
 class RecordingStatusList(BaseModel):
     """Wrapper shape returned by `protect_get_recording_status` (read-only)."""
 
-    cameras: Optional[Dict[str, Any]] = Field(
-        default=None, description="Per-camera recording status map", json_schema_extra={"mutable": False}
+    cameras: Optional[List[Dict[str, Any]]] = Field(
+        default=None, description="Per-camera recording status rows", json_schema_extra={"mutable": False}
     )
     count: Optional[int] = Field(
-        default=None, description="Number of cameras in the status map", json_schema_extra={"mutable": False}
+        default=None, description="Number of cameras in the status list", json_schema_extra={"mutable": False}
     )
 
 
@@ -79,10 +79,7 @@ def from_controller(raw: Any) -> Recording:
 
 def status_list_from_controller(raw: Any) -> RecordingStatusList:
     """Build a RecordingStatusList from the manager's status payload."""
-    cameras = _get(raw, "cameras")
-    if cameras is not None and not isinstance(cameras, dict):
-        cameras = None
     return RecordingStatusList(
-        cameras=cameras,
+        cameras=_get(raw, "cameras"),
         count=_get(raw, "count"),
     )

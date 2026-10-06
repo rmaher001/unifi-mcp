@@ -299,6 +299,7 @@ class TestProtectGetRecordingStatusTool:
         result = await protect_get_recording_status()
         assert result["success"] is True
         assert result["data"]["count"] == 1
+        assert result["data"]["cameras"] == [{"camera_id": "cam-001", "is_recording": True}]
 
     @pytest.mark.asyncio
     async def test_success_single(self, mock_recording_manager):
@@ -312,6 +313,7 @@ class TestProtectGetRecordingStatusTool:
         )
         result = await protect_get_recording_status(camera_id="cam-001")
         assert result["success"] is True
+        assert result["data"]["cameras"] == [{"camera_id": "cam-001", "is_recording": True}]
 
     @pytest.mark.asyncio
     async def test_camera_not_found(self, mock_recording_manager):

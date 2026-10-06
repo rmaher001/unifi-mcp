@@ -80,19 +80,22 @@ class TestFromController:
 
 
 class TestStatusListFromController:
-    def test_full_dict(self) -> None:
-        raw = {
-            "cameras": {"cam-001": {"is_recording": True}, "cam-002": {"is_recording": False}},
-            "count": 2,
-        }
-        status = status_list_from_controller(raw)
-        assert status.cameras == {"cam-001": {"is_recording": True}, "cam-002": {"is_recording": False}}
+    def test_full_payload_keeps_per_camera_rows(self) -> None:
+        rows = [
+            {"camera_id": "cam-001", "recording_mode": "always", "is_recording": True},
+            {"camera_id": "cam-002", "recording_mode": "never", "is_recording": False},
+        ]
+        status = status_list_from_controller({"cameras": rows, "count": 2})
+        assert status.cameras == rows
         assert status.count == 2
+        assert status.model_dump(exclude_none=True)["cameras"] == rows
 
-    def test_non_dict_cameras_dropped_to_none(self) -> None:
-        status = status_list_from_controller({"cameras": [{"camera_id": "cam-001"}], "count": 1})
-        assert status.cameras is None
-        assert status.count == 1
+    def test_mapping_shaped_cameras_fail_loudly(self) -> None:
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            status_list_from_controller({"cameras": {"cam-001": {"is_recording": True}}, "count": 1})
 
     def test_none_cameras_stays_none(self) -> None:
         status = status_list_from_controller({"cameras": None, "count": 0})

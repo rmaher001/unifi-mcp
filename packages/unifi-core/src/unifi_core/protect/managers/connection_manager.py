@@ -74,7 +74,6 @@ class ProtectConnectionManager:
         self._api_key = api_key
 
         self._client: ProtectApiClient | None = None
-        self._api_session: aiohttp.ClientSession | None = None
         self._ws_unsub: Callable[[], None] | None = None
         self._initialized = False
         self._support_attempt = SafeConnectionAttempt().model_dump(mode="json")
@@ -163,10 +162,6 @@ class ProtectConnectionManager:
         if self._client is not None:
             await self._dispose_client(self._client)
             self._client = None
-
-        if self._api_session is not None and not self._api_session.closed:
-            await self._api_session.close()
-            self._api_session = None
 
         self._initialized = False
         logger.info("[protect-cm] Connection closed.")
@@ -285,20 +280,6 @@ class ProtectConnectionManager:
         if self._client is None or not self._initialized:
             raise UniFiConnectionError("ProtectConnectionManager is not initialized. Call initialize() first.")
         return self._client
-
-    @property
-    def api_session(self) -> aiohttp.ClientSession:
-        """Return (or lazily create) an :class:`aiohttp.ClientSession` with the API key header.
-
-        This session is intended for official Protect API endpoints that require
-        an API key rather than cookie-based auth.
-        """
-        if self._api_session is None or self._api_session.closed:
-            headers: dict[str, str] = {}
-            if self._api_key:
-                headers["X-API-Key"] = self._api_key
-            self._api_session = aiohttp.ClientSession(headers=headers)
-        return self._api_session
 
     @property
     def is_connected(self) -> bool:

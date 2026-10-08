@@ -33,7 +33,6 @@ class TestInit:
 
     def test_initial_state(self, cm):
         assert cm._client is None
-        assert cm._api_session is None
         assert cm._ws_unsub is None
         assert cm._initialized is False
         assert cm.is_connected is False
@@ -80,32 +79,6 @@ class TestIsConnected:
         cm._client = mock_client
         cm._initialized = True
         assert cm.is_connected is False
-
-
-class TestApiSession:
-    @pytest.mark.asyncio
-    async def test_creates_session_with_api_key(self, cm):
-        session = cm.api_session
-        assert session is not None
-        assert not session.closed
-        # Verify the API key header was set
-        assert session.headers.get("X-API-Key") == "test-api-key"
-        await session.close()
-
-    @pytest.mark.asyncio
-    async def test_creates_session_without_api_key(self):
-        cm = ProtectConnectionManager(host="h", username="u", password="p")
-        session = cm.api_session
-        assert session is not None
-        assert "X-API-Key" not in session.headers
-        await session.close()
-
-    @pytest.mark.asyncio
-    async def test_returns_same_session(self, cm):
-        s1 = cm.api_session
-        s2 = cm.api_session
-        assert s1 is s2
-        await s1.close()
 
 
 class TestInitialize:

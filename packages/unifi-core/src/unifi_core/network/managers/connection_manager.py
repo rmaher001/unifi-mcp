@@ -686,6 +686,7 @@ class ConnectionManager:
         mode = resolve_controller_type()
         prefixes = ["/proxy/network"] if mode == "proxy" else [""] if mode == "direct" else ["/proxy/network", ""]
         session = await self.unifi_auth.get_api_key_session(
+            self.url_base,
             cookie_jar=aiohttp.DummyCookieJar(),
             timeout=aiohttp.ClientTimeout(total=10),
             middlewares=(self._key_read_transport,),
@@ -777,7 +778,7 @@ class ConnectionManager:
         prefix = self._integration_prefix if self._integration_prefix is not None else "/proxy/network"
         try:
             async with await self.unifi_auth.get_api_key_session(
-                cookie_jar=aiohttp.DummyCookieJar(), timeout=aiohttp.ClientTimeout(total=10)
+                self.url_base, cookie_jar=aiohttp.DummyCookieJar(), timeout=aiohttp.ClientTimeout(total=10)
             ) as session:
                 async with session.get(
                     f"{self.url_base}{prefix}/integration{path}",

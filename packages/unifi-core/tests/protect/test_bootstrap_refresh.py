@@ -79,3 +79,87 @@ async def test_zero_turns_the_refreshing_off(monkeypatch):
 def test_the_default_interval_is_a_minute():
     manager = module.ProtectConnectionManager(host="controller.invalid", username="u", password="p")
     assert manager._bootstrap_refresh_seconds == 60.0
+
+
+@pytest.mark.asyncio
+async def test_close_cancels_in_flight_refresh_before_disposing_client(monkeypatch):
+    client = _client()
+    entered = asyncio.Event()
+    cleanup_order = []
+
+    async def update():
+        if client.update.await_count == 1:
+            return
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleanup_order.append("refresh_cancelled")
+
+    async def disconnect():
+        cleanup_order.append("disconnect")
+
+    async def close_session():
+        cleanup_order.append("close_session")
+
+    client.update.side_effect = update
+    client.async_disconnect_ws.side_effect = disconnect
+    client.close_session.side_effect = close_session
+    manager = await _connected(monkeypatch, client, bootstrap_refresh_seconds=0.001)
+    task = manager._refresh_task
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        await asyncio.wait_for(manager.close(), timeout=1)
+        assert task.cancelled()
+        assert manager._refresh_task is None
+        assert cleanup_order == ["refresh_cancelled", "disconnect", "close_session"]
+        assert manager._client is None
+        assert not manager._initialized
+    finally:
+        await manager.close()
+    client.async_disconnect_ws.assert_awaited_once()
+    client.close_session.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_repeated_initialize_keeps_one_client_and_refresh_task(monkeypatch):
+    client = _client()
+    factory = MagicMock(return_value=client)
+    monkeypatch.setattr(module, "ProtectApiClient", factory)
+    manager = module.ProtectConnectionManager(host="controller.invalid", username="u", password="p")
+    try:
+        assert await manager.initialize()
+        task = manager._refresh_task
+        assert task is not None
+        assert await manager.initialize()
+        assert manager._refresh_task is task
+        factory.assert_called_once()
+        client.update.assert_awaited_once()
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_reinitialize_after_close_starts_fresh_client_and_task(monkeypatch):
+    first, second = _client(), _client()
+    factory = MagicMock(side_effect=[first, second])
+    monkeypatch.setattr(module, "ProtectApiClient", factory)
+    manager = module.ProtectConnectionManager(host="controller.invalid", username="u", password="p")
+    try:
+        assert await manager.initialize()
+        first_task = manager._refresh_task
+        assert first_task is not None
+        await manager.close()
+        assert first_task.done()
+        assert await manager.initialize()
+        assert manager._client is second
+        assert manager._refresh_task is not None
+        assert manager._refresh_task is not first_task
+        assert not manager._refresh_task.done()
+        assert factory.call_count == 2
+        first.update.assert_awaited_once()
+        second.update.assert_awaited_once()
+        first.close_session.assert_awaited_once()
+    finally:
+        await manager.close()
+    second.close_session.assert_awaited_once()

@@ -5,14 +5,13 @@ from unittest.mock import AsyncMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
+from tests.routes.resources.test_network_misc import _bootstrap, _stub_connection
 from unifi_api.db.models import ApiKey
 from unifi_api.graphql.pydantic_export import to_pydantic_model
 from unifi_api.graphql.types.network.threat_posture import ThreatPosture as ApiThreatPosture
 from unifi_api.services.manifest import ManifestRegistry, ToolEntry
 from unifi_core.network.managers.system_manager import SystemManager
 from unifi_core.network.models.threat_posture import threat_posture_from_controller
-
-from tests.routes.resources.test_network_misc import _bootstrap, _stub_connection
 
 _BIG = 2**40
 _TIMESTAMP_MS = 1786225096952

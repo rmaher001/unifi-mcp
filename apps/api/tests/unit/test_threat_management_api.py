@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
+from tests.routes.resources.test_network_misc import _bootstrap, _stub_connection
 from unifi_api.db.models import ApiKey, AuditLog
 from unifi_api.graphql.types.network.threat_management import (
     ThreatManagementSettings as ApiThreatManagementSettings,
@@ -15,8 +16,6 @@ from unifi_core.network.managers.system_manager import SystemManager
 from unifi_core.network.models.threat_management import (
     ThreatManagementSettings as CoreThreatManagementSettings,
 )
-
-from tests.routes.resources.test_network_misc import _bootstrap, _stub_connection
 
 SECRET_TOKEN = "synthetic-utm-token-secret-999"
 

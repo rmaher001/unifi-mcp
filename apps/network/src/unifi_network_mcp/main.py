@@ -7,6 +7,9 @@ Responsibilities:
 • start FastMCP (stdio)
 """
 
+import asyncio
+from contextlib import suppress
+
 from unifi_mcp_shared.permissioned_tool import setup_permissioned_tool
 from unifi_network_mcp.bootstrap import (
     UNIFI_TOOL_REGISTRATION_MODE,
@@ -80,8 +83,19 @@ async def start_event_listener_if_enabled(*, config, connection_manager, event_m
     return True
 
 
+async def start_event_listener_after_connection(*, config, connection_manager, event_manager) -> bool:
+    """Start events after deferred initialization establishes its first connection."""
+    await connection_manager.wait_until_connected()
+    return await start_event_listener_if_enabled(
+        config=config,
+        connection_manager=connection_manager,
+        event_manager=event_manager,
+    )
+
+
 async def main_async():
     """Main asynchronous function to setup and run the server."""
+    from unifi_core.config_helpers import parse_config_bool
     from unifi_core.policy_gate import check_deprecated_env_vars, check_unknown_policy_env_vars
     from unifi_mcp_shared.bootstrap import assert_credentials_configured
     from unifi_mcp_shared.server_lifecycle import apply_log_level, install_asyncio_exception_handler
@@ -94,19 +108,37 @@ async def main_async():
     check_unknown_policy_env_vars("network", logger, policy_gates(), NETWORK_CATEGORY_MAP)
     assert_credentials_configured(config, plugin_name="unifi-network", env_prefix="NETWORK", logger=logger)
 
+    deferred_event_listener_task = None
     try:
-        # Initialize the global Unifi connection
-        logger.info("Initializing global Unifi connection from main_async...")
-        if not await connection_manager.initialize():
-            logger.error("Failed to connect to Unifi Controller from main_async. Tool functionality may be impaired.")
+        # Local MCP clients commonly enforce a short startup timeout. The
+        # connection manager already initializes on demand through
+        # ensure_connected, so confined stdio deployments can defer controller
+        # I/O until a tool call.
+        defer_controller_init = parse_config_bool(config.server.get("defer_controller_init", False))
+        if defer_controller_init:
+            logger.info("Deferring controller initialization until the first tool call")
+            deferred_event_listener_task = asyncio.create_task(
+                start_event_listener_after_connection(
+                    config=config,
+                    connection_manager=connection_manager,
+                    event_manager=event_manager,
+                ),
+                name="network-deferred-event-listener",
+            )
         else:
-            logger.info("Global Unifi connection initialized successfully from main_async.")
+            logger.info("Initializing global Unifi connection from main_async...")
+            if not await connection_manager.initialize():
+                logger.error(
+                    "Failed to connect to Unifi Controller from main_async. Tool functionality may be impaired."
+                )
+            else:
+                logger.info("Global Unifi connection initialized successfully from main_async.")
 
-        await start_event_listener_if_enabled(
-            config=config,
-            connection_manager=connection_manager,
-            event_manager=event_manager,
-        )
+            await start_event_listener_if_enabled(
+                config=config,
+                connection_manager=connection_manager,
+                event_manager=event_manager,
+            )
 
         # ---- Register tools ----
         await register_tools_for_mode(
@@ -123,6 +155,7 @@ async def main_async():
             config=config,
             logger=logger,
             support_bundle_handler=support_bundle_service.generate,
+            include_meta_tools=parse_config_bool(config.server.get("meta_tools_enabled", True), default=True),
         )
 
         # ---- Start transports ----
@@ -136,6 +169,10 @@ async def main_async():
             logger=logger,
         )
     finally:
+        if deferred_event_listener_task is not None and not deferred_event_listener_task.done():
+            deferred_event_listener_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await deferred_event_listener_task
         try:
             await event_manager.stop_listening()
         finally:

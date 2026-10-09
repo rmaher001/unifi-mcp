@@ -24,6 +24,7 @@ def _startup(
     session_configured: bool = True,
     session_available: bool = True,
     api_key_configured: bool = False,
+    registration: AsyncMock | None = None,
 ):
     events = dict(getattr(config.network, "events", {}) or {})
     events["websocket_enabled"] = websocket_enabled
@@ -44,7 +45,7 @@ def _startup(
         ),
         patch.object(network_main.event_manager, "start_listening", listener or AsyncMock()) as started,
         patch.object(network_main.event_manager, "stop_listening", AsyncMock()) as stopped,
-        patch("unifi_mcp_shared.tool_registration.register_tools_for_mode", AsyncMock()),
+        patch("unifi_mcp_shared.tool_registration.register_tools_for_mode", registration or AsyncMock()),
         patch("unifi_mcp_shared.transport.resolve_http_config", return_value=(False, "http", "0.0.0.0", 3000)),
         patch("unifi_mcp_shared.transport.run_transports", transports or AsyncMock()) as ran,
     ):
@@ -102,6 +103,50 @@ def test_the_listener_is_not_started_when_the_websocket_is_disabled() -> None:
     with _startup(connected=True, websocket_enabled=False) as (started, _, _):
         asyncio.run(network_main.main_async())
         started.assert_not_awaited()
+
+
+def test_deferred_startup_starts_listener_after_first_connection() -> None:
+    connection_ready = asyncio.Event()
+
+    async def wait_until_connected() -> None:
+        await connection_ready.wait()
+
+    async def run_transports(**_kwargs) -> None:
+        network_main.connection_manager.initialize.assert_not_awaited()
+        started.assert_not_awaited()
+        connection_ready.set()
+        await asyncio.sleep(0)
+        started.assert_awaited_once()
+
+    transports = AsyncMock(side_effect=run_transports)
+    with (
+        patch.dict(config.server, {"defer_controller_init": True}, clear=False),
+        patch.object(
+            network_main.connection_manager,
+            "wait_until_connected",
+            AsyncMock(side_effect=wait_until_connected),
+        ) as waited,
+        _startup(connected=True, websocket_enabled=True, transports=transports) as (started, _, ran),
+    ):
+        asyncio.run(network_main.main_async())
+        network_main.connection_manager.initialize.assert_not_awaited()
+        waited.assert_awaited_once()
+        started.assert_awaited_once()
+        assert ran.await_count == 1
+
+
+def test_meta_tools_setting_is_read_from_canonical_config() -> None:
+    registration = AsyncMock()
+    with (
+        patch.dict(config.server, {"meta_tools_enabled": False}, clear=False),
+        _startup(
+            connected=True,
+            websocket_enabled=False,
+            registration=registration,
+        ),
+    ):
+        asyncio.run(network_main.main_async())
+        assert registration.await_args.kwargs["include_meta_tools"] is False
 
 
 def test_a_listener_failure_does_not_take_the_server_down() -> None:

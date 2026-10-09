@@ -42,6 +42,7 @@ async def register_tools_for_mode(
     register_meta_tools: Callable | None = None,
     register_load_tools: Callable | None = None,
     auto_load_tools: Callable | None = None,
+    include_meta_tools: bool = True,
 ) -> None:
     """Register meta-tools and domain tools based on *mode*.
 
@@ -64,9 +65,20 @@ async def register_tools_for_mode(
         register_meta_tools: Shared meta-tools registration function.
         register_load_tools: Shared load_tools registration function.
         auto_load_tools: Shared eager tool auto-discovery function.
+        include_meta_tools: Whether to expose indirect discovery, execute, and
+            batch tools. Disabling is supported only in eager mode, where
+            direct tools can be allowlisted independently.
     """
+    if not include_meta_tools and mode != "eager":
+        raise ValueError("meta-tools can be disabled only in eager registration mode")
+
+    enabled_categories = _parse_filter_list(config.server.get("enabled_categories")) if mode == "eager" else None
+    enabled_tools = _parse_filter_list(config.server.get("enabled_tools")) if mode == "eager" else None
+    if not include_meta_tools and not (enabled_categories or enabled_tools):
+        raise ValueError("disabling meta-tools requires enabled_categories or enabled_tools")
+
     # Late-import defaults from shared package if not provided
-    if register_meta_tools is None:
+    if include_meta_tools and register_meta_tools is None:
         from unifi_mcp_shared.meta_tools import register_meta_tools
     if register_load_tools is None:
         from unifi_mcp_shared.meta_tools import register_load_tools
@@ -88,8 +100,10 @@ async def register_tools_for_mode(
         meta_kwargs["prefix"] = prefix
         meta_kwargs["server_label"] = server_label
 
-    # Always register meta-tools first
-    register_meta_tools(**meta_kwargs)
+    if include_meta_tools:
+        register_meta_tools(**meta_kwargs)
+    else:
+        logger.info("Meta-tools disabled for confined eager registration")
 
     tool_prefix = prefix or "unifi"
     support_hint = f", {tool_prefix}_get_support_bundle" if support_bundle_handler is not None else ""
@@ -142,9 +156,6 @@ async def register_tools_for_mode(
     else:  # eager
         logger.info("Tool registration mode: eager")
 
-        enabled_categories = _parse_filter_list(config.server.get("enabled_categories"))
-        enabled_tools = _parse_filter_list(config.server.get("enabled_tools"))
-
         if enabled_categories:
             logger.info("   Filtering by categories: %s", enabled_categories)
         elif enabled_tools:
@@ -152,12 +163,14 @@ async def register_tools_for_mode(
         else:
             logger.info("   All tools registered (no filtering)")
 
-        auto_load_tools(
+        filtering = auto_load_tools(
             base_package=base_package,
             enabled_categories=enabled_categories,
             enabled_tools=enabled_tools,
             server=server,
         )
+        if filtering is not None:
+            await filtering
 
     # Log registered tools
     try:

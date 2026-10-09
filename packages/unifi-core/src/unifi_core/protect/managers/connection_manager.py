@@ -8,6 +8,7 @@ websocket subscription, and graceful shutdown.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, Callable
@@ -33,6 +34,13 @@ from unifi_core.support_transport import no_retry_support_request
 
 logger = logging.getLogger(__name__)
 
+# How often the bootstrap is fetched again while the connection lives. The
+# websocket keeps cameras and events current, but not every NVR field: without
+# a re-fetch, firmware_version, is_updating and up_since stay at their values
+# from connect time - across a UniFi OS update and reboot of the console.
+# Home Assistant's Protect integration re-fetches on the same order.
+BOOTSTRAP_REFRESH_SECONDS = 60.0
+
 
 class ProtectConnectionManager:
     """Manages the connection to the UniFi Protect controller.
@@ -53,6 +61,9 @@ class ProtectConnectionManager:
         Whether to verify the server's TLS certificate.
     api_key:
         Optional API key for official Protect API endpoints.
+    bootstrap_refresh_seconds:
+        How often the bootstrap is fetched again after :meth:`initialize`;
+        ``0`` turns the re-fetch off.
     """
 
     def __init__(
@@ -64,6 +75,7 @@ class ProtectConnectionManager:
         site: str = "default",
         verify_ssl: bool = False,
         api_key: str | None = None,
+        bootstrap_refresh_seconds: float = BOOTSTRAP_REFRESH_SECONDS,
     ):
         self.host = host
         self.username = username
@@ -77,6 +89,8 @@ class ProtectConnectionManager:
         self._ws_unsub: Callable[[], None] | None = None
         self._initialized = False
         self._support_attempt = SafeConnectionAttempt().model_dump(mode="json")
+        self._bootstrap_refresh_seconds = bootstrap_refresh_seconds
+        self._refresh_task: asyncio.Task[None] | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -124,6 +138,7 @@ class ProtectConnectionManager:
             await retry_with_backoff(_connect, policy=policy)
             self._initialized = True
             self._support_attempt = connection_attempt_succeeded()
+            self._start_bootstrap_refresh()
             logger.info(
                 "[protect-cm] Connected to UniFi Protect at %s:%s",
                 self.host,
@@ -150,8 +165,43 @@ class ProtectConnectionManager:
             except Exception as exc:
                 logger.debug("[protect-cm] %s failed: %s", operation, type(exc).__name__)
 
+    def _start_bootstrap_refresh(self) -> None:
+        if self._bootstrap_refresh_seconds <= 0 or self._refresh_task is not None:
+            return
+        self._refresh_task = asyncio.get_running_loop().create_task(self._refresh_bootstrap_forever())
+
+    async def refresh_bootstrap(self) -> bool:
+        """Fetch the bootstrap again. Returns ``True`` on success.
+
+        A failure (the console rebooting, a dropped session) is logged and
+        leaves the last bootstrap in place; the next attempt follows on the
+        interval. ``client.update()`` re-authenticates as it needs to.
+        """
+        if self._client is None:
+            return False
+        try:
+            await self._client.update()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("[protect-cm] Bootstrap refresh failed: %s", type(exc).__name__)
+            return False
+        return True
+
+    async def _refresh_bootstrap_forever(self) -> None:
+        while True:
+            await asyncio.sleep(self._bootstrap_refresh_seconds)
+            await self.refresh_bootstrap()
+
     async def close(self) -> None:
         """Gracefully shut down websocket, client session, and API session."""
+        if self._refresh_task is not None:
+            self._refresh_task.cancel()
+            try:
+                await self._refresh_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._refresh_task = None
         if self._ws_unsub is not None:
             try:
                 self._ws_unsub()

@@ -31,13 +31,22 @@ async def _connected(monkeypatch, client, **kwargs):
     return manager
 
 
+async def _until_updates(client, count, timeout=5.0):
+    """Wait for ``count`` bootstrap fetches without depending on scheduler speed."""
+
+    async def _wait():
+        while client.update.await_count < count:
+            await asyncio.sleep(0.005)
+
+    await asyncio.wait_for(_wait(), timeout)
+
+
 @pytest.mark.asyncio
 async def test_the_bootstrap_is_fetched_again_on_an_interval(monkeypatch):
     client = _client()
     manager = await _connected(monkeypatch, client, bootstrap_refresh_seconds=0.01)
     try:
-        await asyncio.sleep(0.05)
-        assert client.update.await_count >= 3, "the connect fetch, then at least two refreshes"
+        await _until_updates(client, 3)  # the connect fetch, then at least two refreshes
     finally:
         await manager.close()
 
@@ -48,8 +57,7 @@ async def test_a_failed_refresh_keeps_the_connection_and_tries_again(monkeypatch
     manager = await _connected(monkeypatch, client, bootstrap_refresh_seconds=0.01)
     client.update.side_effect = RuntimeError("console rebooting")
     try:
-        await asyncio.sleep(0.05)
-        assert client.update.await_count >= 3, "a failure does not end the refreshing"
+        await _until_updates(client, 3)  # a failure does not end the refreshing
         assert manager._client is client and manager._initialized
     finally:
         await manager.close()

@@ -1,4 +1,4 @@
-# Protect Server Tool Reference (62 tools)
+# Protect Server Tool Reference (63 tools)
 
 Complete reference for `protect_*` tools. All read tools are always available. All mutations are **disabled by default** — the user must explicitly enable them because Protect controls physical security hardware.
 
@@ -155,7 +155,7 @@ Always available, regardless of registration mode.
 ## System
 
 <!-- AUTO:tools:system -->
-5 tools.
+6 tools.
 
 | Tool | Type | Description |
 |------|------|-------------|
@@ -163,6 +163,7 @@ Always available, regardless of registration mode.
 | `protect_get_health` | Read | Returns NVR health summary including CPU load and temperature, memory usage, and storage utilization. |
 | `protect_get_system_info` | Read | Returns NVR model, firmware version, uptime, storage usage, and connected device counts. |
 | `protect_list_viewers` | Read | Lists all connected Protect viewers (e.g., UP-Viewer, Viewport) with their connection state, firmware version, and assigned liveview. |
+| `protect_rename_device` | Mutate | Renames any adopted UniFi Protect device listed by protect_get_firmware_status, such as a camera, light, sensor, viewer, chime or bridge. |
 | `protect_update_viewer` | Mutate | Updates a UniFi Protect viewer name or liveview assignment. |
 <!-- /AUTO:tools:system -->
 

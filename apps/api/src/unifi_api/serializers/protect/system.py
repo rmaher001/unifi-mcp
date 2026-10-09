@@ -10,16 +10,21 @@ in ``PHASE6_TYPE_MIGRATED_TOOLS`` and dispatched via the type_registry
 by both REST routes and the action endpoint.
 
 This module now only ships ``ViewerMutationAckSerializer`` for the
-``protect_update_viewer`` preview-and-confirm tool. System reboot lives
-in a different module.
+``protect_update_viewer`` and ``protect_rename_device`` preview-and-confirm
+tools. System reboot lives in a different module.
 """
 
 from unifi_api.serializers._base import RenderKind, Serializer, register_serializer
 
 
-@register_serializer(tools={"protect_update_viewer": {"kind": RenderKind.DETAIL}})
+@register_serializer(
+    tools={
+        "protect_update_viewer": {"kind": RenderKind.DETAIL},
+        "protect_rename_device": {"kind": RenderKind.DETAIL},
+    }
+)
 class ViewerMutationAckSerializer(Serializer):
-    """Pass-through ack for viewer update preview/apply dicts."""
+    """Pass-through ack for viewer update and device rename preview/apply dicts."""
 
     @staticmethod
     def serialize(obj) -> dict:

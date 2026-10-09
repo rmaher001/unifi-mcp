@@ -1,5 +1,5 @@
 {
-  "count": 62,
+  "count": 63,
   "generated_by": "scripts/generate_tool_manifest.py",
   "module_map": {
     "protect_acknowledge_event": "unifi_protect_mcp.tools.events",
@@ -46,6 +46,7 @@
     "protect_ptz_zoom": "unifi_protect_mcp.tools.cameras",
     "protect_reboot_camera": "unifi_protect_mcp.tools.cameras",
     "protect_recent_events": "unifi_protect_mcp.tools.events",
+    "protect_rename_device": "unifi_protect_mcp.tools.system",
     "protect_search_detections": "unifi_protect_mcp.tools.events",
     "protect_subscribe_events": "unifi_protect_mcp.tools.events",
     "protect_toggle_recording": "unifi_protect_mcp.tools.cameras",
@@ -4639,6 +4640,112 @@
     },
     {
       "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "auth_method": "local_only",
+      "description": "Renames any adopted UniFi Protect device listed by protect_get_firmware_status, such as a camera, light, sensor, viewer, chime or bridge. Get device_id values from protect_get_firmware_status, which lists every adopted device with its type. Uses the local session, so no API key is needed. Requires confirm=True to apply.",
+      "name": "protect_rename_device",
+      "permission_action": "update",
+      "permission_category": "system",
+      "schema": {
+        "input": {
+          "properties": {
+            "confirm": {
+              "description": "When true, executes the mutation. When false (default), returns a preview of the changes.",
+              "type": "boolean"
+            },
+            "device_id": {
+              "description": "Device UUID from protect_get_firmware_status",
+              "type": "string"
+            },
+            "name": {
+              "description": "The new device name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "device_id",
+            "name"
+          ],
+          "type": "object"
+        },
+        "output": {
+          "additionalProperties": true,
+          "description": "Structured view of the existing UniFi MCP tool response contract.",
+          "properties": {
+            "data": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Successful result payload.",
+              "title": "Data"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Actionable error message for handled failures.",
+              "title": "Error"
+            },
+            "preview": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Mutation preview payload returned before confirmation.",
+              "title": "Preview"
+            },
+            "requires_confirmation": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "True when a mutation preview requires caller confirmation.",
+              "title": "Requires Confirmation"
+            },
+            "success": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "True when the tool call succeeded; false for handled errors.",
+              "title": "Success"
+            }
+          },
+          "title": "UniFiToolResponse",
+          "type": "object"
+        }
+      },
+      "title": "Rename Device"
+    },
+    {
+      "annotations": {
         "openWorldHint": false,
         "readOnlyHint": true
       },
@@ -5828,7 +5935,7 @@
         "readOnlyHint": false
       },
       "auth_method": "both",
-      "description": "Updates UniFi Protect sensor settings. Get sensor_id values from protect_list_sensors. Requires a Protect public API key configured on the server via UNIFI_PROTECT_API_KEY or UNIFI_API_KEY. Requires confirm=True to apply. Supported keys: name, light_settings, humidity_settings, temperature_settings, motion_settings, glass_break_settings, alarm_settings, schedule_mode, arm_profile_ids, has_custom_sensitivity_when_armed. Use snake_case inside nested settings, for example motion_settings.sensitivity_when_armed or light_settings.low_threshold.",
+      "description": "Updates UniFi Protect sensor settings. Get sensor_id values from protect_list_sensors. A rename alone (only the name key) needs no API key. Every other setting requires a Protect public API key configured on the server via UNIFI_PROTECT_API_KEY or UNIFI_API_KEY. Requires confirm=True to apply. Supported keys: name, light_settings, humidity_settings, temperature_settings, motion_settings, glass_break_settings, alarm_settings, schedule_mode, arm_profile_ids, has_custom_sensitivity_when_armed. Use snake_case inside nested settings, for example motion_settings.sensitivity_when_armed or light_settings.low_threshold.",
       "name": "protect_update_sensor_settings",
       "permission_action": "update",
       "permission_category": "sensor",

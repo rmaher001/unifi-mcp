@@ -169,6 +169,7 @@ DISPATCH_OVERRIDES: dict[str, tuple[str, str]] = {
     "protect_update_chime": ("chime_manager", "apply_chime_settings"),
     "protect_update_light": ("light_manager", "apply_light_settings"),
     "protect_update_viewer": ("system_manager", "apply_viewer_update"),
+    "protect_rename_device": ("system_manager", "apply_rename_device"),
     "protect_acknowledge_event": ("event_manager", "apply_acknowledge_event"),
     "protect_update_known_face": ("recognition_manager", "apply_update_known_face"),
     "protect_merge_known_faces": ("recognition_manager", "apply_merge_known_faces"),

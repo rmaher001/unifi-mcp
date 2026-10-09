@@ -1,7 +1,7 @@
 """System tools for UniFi Protect MCP server.
 
-Provides read-only tools for querying NVR system info, health,
-connected viewers, and firmware update status.
+Provides tools for querying NVR system info, health, connected viewers and
+firmware update status, and for renaming any adopted device.
 """
 
 import logging
@@ -144,6 +144,49 @@ async def protect_update_viewer(
 
 
 @server.tool(
+    name="protect_rename_device",
+    description=(
+        "Renames any adopted UniFi Protect device listed by protect_get_firmware_status, such as a camera, "
+        "light, sensor, viewer, chime or bridge. "
+        "Get device_id values from protect_get_firmware_status, which lists every adopted device with its type. "
+        "Uses the local session, so no API key is needed. Requires confirm=True to apply."
+    ),
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False),
+    permission_category="system",
+    permission_action="update",
+)
+async def protect_rename_device(
+    device_id: Annotated[str, Field(description="Device UUID from protect_get_firmware_status")],
+    name: Annotated[str, Field(description="The new device name")],
+    confirm: Annotated[
+        bool,
+        Field(description="When true, executes the mutation. When false (default), returns a preview of the changes."),
+    ] = False,
+) -> Dict[str, Any]:
+    """Rename a Protect device with preview/confirm."""
+    logger.info("protect_rename_device tool called for %s (confirm=%s)", device_id, confirm)
+    try:
+        if not confirm:
+            preview_data = await system_manager.rename_device(device_id, name)
+            return preview_response(
+                action="update",
+                resource_type="device_name",
+                resource_id=device_id,
+                current_state=preview_data["current_state"],
+                proposed_changes=preview_data["proposed_changes"],
+                resource_name=preview_data["device_name"],
+            )
+
+        result = await system_manager.apply_rename_device(device_id, name)
+        return {"success": True, "data": result}
+    except (UniFiNotFoundError, ValueError) as e:
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        logger.error("Error renaming device %s: %s", device_id, e, exc_info=True)
+        return {"success": False, "error": f"Failed to rename device: {e}"}
+
+
+@server.tool(
     name="protect_get_firmware_status",
     description=(
         "Returns firmware update availability for the NVR and all adopted devices "
@@ -166,5 +209,5 @@ async def protect_get_firmware_status() -> Dict[str, Any]:
 
 logger.info(
     "System tools registered: protect_get_system_info, protect_get_health, "
-    "protect_list_viewers, protect_update_viewer, protect_get_firmware_status"
+    "protect_list_viewers, protect_update_viewer, protect_rename_device, protect_get_firmware_status"
 )

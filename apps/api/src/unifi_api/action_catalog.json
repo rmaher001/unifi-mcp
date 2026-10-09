@@ -1833,6 +1833,34 @@
       }
     },
     {
+      "name": "protect_rename_device",
+      "product": "protect",
+      "category": "system",
+      "permission_action": "update",
+      "read_only_hint": false,
+      "auth_method": "local_only",
+      "manager_attr": "system_manager",
+      "manager_method": "apply_rename_device",
+      "input_schema": {
+        "properties": {
+          "device_id": {
+            "description": "Device UUID from protect_get_firmware_status",
+            "type": "string"
+          },
+          "name": {
+            "description": "The new device name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_id",
+          "name"
+        ],
+        "type": "object",
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "protect_search_detections",
       "product": "protect",
       "category": "events",

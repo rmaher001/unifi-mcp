@@ -413,6 +413,107 @@ class TestSystemManagerUpdateViewer:
         assert "missing" in str(exc_info.value)
 
 
+def _make_bridge(**overrides):
+    b = MagicMock()
+    b.id = overrides.get("id", "bridge-001")
+    b.name = overrides.get("name", "Protect Bridge")
+    b.set_name = AsyncMock()
+    return b
+
+
+class TestSystemManagerRenameDevice:
+    @pytest.mark.asyncio
+    async def test_preview_finds_device_in_any_collection(self):
+        from unifi_core.protect.managers.system_manager import SystemManager
+
+        cm = MagicMock()
+        cm.client.bootstrap = _make_bootstrap(bridges={"bridge-001": _make_bridge()})
+        cm.require_public_api_key = MagicMock(side_effect=AssertionError("public API not expected"))
+        mgr = SystemManager(cm)
+
+        result = await mgr.rename_device("bridge-001", "Hallway Bridge")
+
+        assert result == {
+            "device_id": "bridge-001",
+            "device_type": "bridge",
+            "device_name": "Protect Bridge",
+            "current_state": {"name": "Protect Bridge"},
+            "proposed_changes": {"name": "Hallway Bridge"},
+        }
+        cm.require_public_api_key.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_apply_renames_through_session(self):
+        from unifi_core.protect.managers.system_manager import SystemManager
+
+        bridge = _make_bridge()
+        cm = MagicMock()
+        cm.client.bootstrap = _make_bootstrap(bridges={"bridge-001": bridge})
+        cm.require_public_api_key = MagicMock(side_effect=AssertionError("public API not expected"))
+        mgr = SystemManager(cm)
+
+        result = await mgr.apply_rename_device("bridge-001", "Hallway Bridge")
+
+        bridge.set_name.assert_awaited_once_with("Hallway Bridge")
+        assert result["device_id"] == "bridge-001"
+        assert result["device_type"] == "bridge"
+        assert result["applied"] == {"name": "Hallway Bridge"}
+        cm.require_public_api_key.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "collection, device_type",
+        [
+            ("cameras", "camera"),
+            ("lights", "light"),
+            ("sensors", "sensor"),
+            ("viewers", "viewer"),
+            ("chimes", "chime"),
+            ("bridges", "bridge"),
+            ("doorlocks", "doorlock"),
+        ],
+    )
+    async def test_every_adoptable_device_type_is_renamable(self, collection, device_type):
+        from unifi_core.protect.managers.system_manager import SystemManager
+
+        device = _make_bridge(id="dev-001", name="Old Name")
+        cm = MagicMock()
+        cm.client.bootstrap = _make_bootstrap(**{collection: {"dev-001": device}})
+        mgr = SystemManager(cm)
+
+        result = await mgr.apply_rename_device("dev-001", "New Name")
+
+        device.set_name.assert_awaited_once_with("New Name")
+        assert result["device_type"] == device_type
+
+    @pytest.mark.asyncio
+    async def test_unknown_device_raises_not_found(self, mock_cm):
+        from unifi_core.protect.managers.system_manager import SystemManager
+
+        mgr = SystemManager(mock_cm)
+
+        with pytest.raises(UniFiNotFoundError):
+            await mgr.rename_device("missing", "New Name")
+        with pytest.raises(UniFiNotFoundError):
+            await mgr.apply_rename_device("missing", "New Name")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("name", ["", "   "])
+    async def test_blank_name_is_rejected_before_any_write(self, name):
+        from unifi_core.protect.managers.system_manager import SystemManager
+
+        bridge = _make_bridge()
+        cm = MagicMock()
+        cm.client.bootstrap = _make_bootstrap(bridges={"bridge-001": bridge})
+        mgr = SystemManager(cm)
+
+        with pytest.raises(ValueError, match="name"):
+            await mgr.rename_device("bridge-001", name)
+        with pytest.raises(ValueError, match="name"):
+            await mgr.apply_rename_device("bridge-001", name)
+        bridge.set_name.assert_not_called()
+
+
 class TestSystemManagerGetFirmwareStatus:
     @pytest.mark.asyncio
     async def test_no_devices(self, mock_cm):
@@ -627,6 +728,57 @@ class TestProtectUpdateViewerTool:
 
         assert result["success"] is False
         assert result["error"] == "Failed to update viewer: network down"
+
+
+class TestProtectRenameDeviceTool:
+    @pytest.mark.asyncio
+    async def test_preview(self, mock_system_manager):
+        from unifi_protect_mcp.tools.system import protect_rename_device
+
+        mock_system_manager.rename_device = AsyncMock(
+            return_value={
+                "device_id": "bridge-001",
+                "device_type": "bridge",
+                "device_name": "Protect Bridge",
+                "current_state": {"name": "Protect Bridge"},
+                "proposed_changes": {"name": "Hallway Bridge"},
+            }
+        )
+        mock_system_manager.apply_rename_device = AsyncMock()
+
+        result = await protect_rename_device("bridge-001", "Hallway Bridge")
+
+        assert result["success"] is True
+        assert result["requires_confirmation"] is True
+        mock_system_manager.rename_device.assert_awaited_once_with("bridge-001", "Hallway Bridge")
+        mock_system_manager.apply_rename_device.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_confirm(self, mock_system_manager):
+        from unifi_protect_mcp.tools.system import protect_rename_device
+
+        mock_system_manager.apply_rename_device = AsyncMock(
+            return_value={"device_id": "bridge-001", "device_type": "bridge", "applied": {"name": "Hallway Bridge"}}
+        )
+
+        result = await protect_rename_device("bridge-001", "Hallway Bridge", confirm=True)
+
+        assert result == {
+            "success": True,
+            "data": {"device_id": "bridge-001", "device_type": "bridge", "applied": {"name": "Hallway Bridge"}},
+        }
+        mock_system_manager.apply_rename_device.assert_awaited_once_with("bridge-001", "Hallway Bridge")
+
+    @pytest.mark.asyncio
+    async def test_not_found(self, mock_system_manager):
+        from unifi_protect_mcp.tools.system import protect_rename_device
+
+        mock_system_manager.rename_device = AsyncMock(side_effect=UniFiNotFoundError("device", "missing"))
+
+        result = await protect_rename_device("missing", "Hallway Bridge")
+
+        assert result["success"] is False
+        assert "missing" in result["error"]
 
 
 class TestProtectGetFirmwareStatusTool:

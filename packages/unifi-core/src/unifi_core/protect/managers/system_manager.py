@@ -1,7 +1,8 @@
 """System management for UniFi Protect.
 
 Provides methods to query NVR system information, health, viewers,
-and firmware status from the pyunifiprotect bootstrap data.
+and firmware status from the pyunifiprotect bootstrap data, and to rename
+any adopted device through the session.
 """
 
 from __future__ import annotations
@@ -16,6 +17,18 @@ from unifi_core.protect.managers.connection_manager import ProtectConnectionMana
 from unifi_core.protect.models.system import to_viewer_public_update, viewer_public_update_to_agent
 
 logger = logging.getLogger(__name__)
+
+
+# Adopted device type -> its bootstrap collection.
+_DEVICE_COLLECTIONS = {
+    "camera": "cameras",
+    "light": "lights",
+    "sensor": "sensors",
+    "viewer": "viewers",
+    "chime": "chimes",
+    "bridge": "bridges",
+    "doorlock": "doorlocks",
+}
 
 
 class SystemManager:
@@ -46,6 +59,21 @@ class SystemManager:
             "Verify viewer_id with protect_list_viewers and liveview_id with protect_list_liveviews, "
             "and ensure UNIFI_PROTECT_API_KEY or UNIFI_API_KEY has Protect public API access."
         ) from exc
+
+    def _find_device(self, device_id: str) -> tuple[str, Any]:
+        """Return (device_type, device) for an adopted device, raising UniFiNotFoundError if absent."""
+        bootstrap = self._cm.client.bootstrap
+        for device_type, collection in _DEVICE_COLLECTIONS.items():
+            device = self._bootstrap_collection(bootstrap, collection).get(device_id)
+            if device is not None:
+                return device_type, device
+        raise UniFiNotFoundError("device", device_id)
+
+    @staticmethod
+    def _validate_device_name(name: str) -> str:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("A device name must be a non-empty string.")
+        return name
 
     async def _get_public_viewer(self, viewer_id: str, operation: str) -> Any:
         try:
@@ -218,6 +246,30 @@ class SystemManager:
             "updated_state": updated_state,
         }
 
+    async def rename_device(self, device_id: str, name: str) -> Dict[str, Any]:
+        """Return the current and proposed name of any adopted device for preview."""
+        name = self._validate_device_name(name)
+        device_type, device = self._find_device(device_id)
+        return {
+            "device_id": device_id,
+            "device_type": device_type,
+            "device_name": device.name,
+            "current_state": {"name": device.name},
+            "proposed_changes": {"name": name},
+        }
+
+    async def apply_rename_device(self, device_id: str, name: str) -> Dict[str, Any]:
+        """Rename any adopted device through the session after confirmation."""
+        name = self._validate_device_name(name)
+        device_type, device = self._find_device(device_id)
+        await device.set_name(name)
+        return {
+            "device_id": device_id,
+            "device_type": device_type,
+            "device_name": device.name,
+            "applied": {"name": name},
+        }
+
     async def get_firmware_status(self) -> Dict[str, Any]:
         """Return firmware update availability for NVR and all devices."""
         bootstrap = self._cm.client.bootstrap
@@ -227,13 +279,8 @@ class SystemManager:
 
         # Collect firmware info from each device category
         device_collections = {
-            "camera": self._bootstrap_collection(bootstrap, "cameras"),
-            "light": self._bootstrap_collection(bootstrap, "lights"),
-            "sensor": self._bootstrap_collection(bootstrap, "sensors"),
-            "viewer": self._bootstrap_collection(bootstrap, "viewers"),
-            "chime": self._bootstrap_collection(bootstrap, "chimes"),
-            "bridge": self._bootstrap_collection(bootstrap, "bridges"),
-            "doorlock": self._bootstrap_collection(bootstrap, "doorlocks"),
+            category: self._bootstrap_collection(bootstrap, collection)
+            for category, collection in _DEVICE_COLLECTIONS.items()
         }
 
         for category, collection in device_collections.items():

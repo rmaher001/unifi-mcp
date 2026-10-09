@@ -1,6 +1,6 @@
 # Tool Catalog
 
-The UniFi Protect MCP server exposes 62 tools (including 6 meta-tools), all prefixed with `protect_`. Read-only tools are always available. Mutating tools are controlled by the [permission system](permissions.md).
+The UniFi Protect MCP server exposes 63 tools (including 6 meta-tools), all prefixed with `protect_`. Read-only tools are always available. Mutating tools are controlled by the [permission system](permissions.md).
 
 Standard MCP clients should use `tools/list` for currently registered tools. For compact manifest-backed metadata in lazy workflows, call the `protect_tool_index` compatibility meta-tool at runtime, or inspect `src/unifi_protect_mcp/tools_manifest.json`. In `meta_only` mode, the index initially contains only meta-tools; executing a known domain tool lazily registers its module, so later index results can include those loaded tools.
 
@@ -100,12 +100,13 @@ The alarm-rule tools are version-agnostic. `protect_alarm_list_rules` / `protect
 - `protect_update_known_license_plate` -- Update Known License Plate metadata such as name, description, and notifications (confirm required)
 - `protect_delete_known_license_plate` -- Delete or remove a license-plate recognition group (confirm required)
 
-## System (4 tools)
+## System (5 tools)
 
 - `protect_get_system_info` -- NVR model, firmware, uptime, storage, device counts
 - `protect_get_health` -- CPU load/temp, memory usage, storage utilization
 - `protect_list_viewers` -- Connected Protect viewers (Viewport) with firmware and liveview
 - `protect_get_firmware_status` -- Firmware update availability for NVR and all devices
+- `protect_rename_device` -- Rename any adopted device (camera, light, sensor, viewer, chime, bridge); no API key needed (confirm required)
 
 ## MCP Resources
 

@@ -165,7 +165,8 @@ async def protect_list_sensors() -> Dict[str, Any]:
     auth="both",
     description=(
         "Updates UniFi Protect sensor settings. Get sensor_id values from protect_list_sensors. "
-        "Requires a Protect public API key configured on the server via UNIFI_PROTECT_API_KEY or UNIFI_API_KEY. "
+        "A rename alone (only the name key) needs no API key. Every other setting requires a Protect public "
+        "API key configured on the server via UNIFI_PROTECT_API_KEY or UNIFI_API_KEY. "
         "Requires confirm=True to apply. Supported keys: name, light_settings, humidity_settings, "
         "temperature_settings, motion_settings, glass_break_settings, alarm_settings, schedule_mode, "
         "arm_profile_ids, has_custom_sensitivity_when_armed. Use snake_case inside nested settings, for example "

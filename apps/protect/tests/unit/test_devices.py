@@ -470,7 +470,7 @@ class TestSensorManagerUpdateSettings:
         mgr = SensorManager(cm)
 
         with pytest.raises(ValueError, match="requires an API key"):
-            await mgr.apply_sensor_settings("sensor-001", {"name": "Front Door"})
+            await mgr.apply_sensor_settings("sensor-001", {"schedule_mode": "always"})
 
         cm.require_public_api_key.assert_called_once_with("update sensor settings")
         cm.client.update_sensor_public.assert_not_called()
@@ -489,7 +489,7 @@ class TestSensorManagerUpdateSettings:
         mgr = SensorManager(cm)
 
         with pytest.raises(ValueError, match="requires an API key"):
-            await mgr.update_sensor_settings("sensor-001", {"name": "Front Door"})
+            await mgr.update_sensor_settings("sensor-001", {"schedule_mode": "always"})
 
         cm.require_public_api_key.assert_called_once_with("update sensor settings")
         cm.client.get_sensor_public.assert_not_called()
@@ -574,7 +574,7 @@ class TestSensorManagerUpdateSettings:
         mgr = SensorManager(cm)
 
         with pytest.raises(UniFiNotFoundError) as exc_info:
-            await mgr.update_sensor_settings("missing", {"name": "Garage"})
+            await mgr.update_sensor_settings("missing", {"schedule_mode": "always"})
 
         assert "missing" in str(exc_info.value)
 
@@ -588,12 +588,74 @@ class TestSensorManagerUpdateSettings:
         mgr = SensorManager(cm)
 
         with pytest.raises(ValueError) as exc_info:
-            await mgr.apply_sensor_settings("sensor-001", {"name": "Garage"})
+            await mgr.apply_sensor_settings("sensor-001", {"schedule_mode": "always"})
 
         message = str(exc_info.value)
         assert "Failed to update sensor settings for sensor sensor-001" in message
         assert "protect_list_sensors" in message
         assert "UNIFI_PROTECT_API_KEY" in message
+
+    @pytest.mark.asyncio
+    async def test_name_only_preview_reads_bootstrap_without_public_api(self, mock_cm_sensors):
+        from unifi_core.protect.managers.sensor_manager import SensorManager
+
+        mock_cm_sensors.require_public_api_key = MagicMock(side_effect=AssertionError("public API not expected"))
+        mock_cm_sensors.client.get_sensor_public = AsyncMock()
+        mgr = SensorManager(mock_cm_sensors)
+
+        result = await mgr.update_sensor_settings("sensor-001", {"name": "Back Door Sensor"})
+
+        assert result == {
+            "sensor_id": "sensor-001",
+            "sensor_name": "Front Door Sensor",
+            "current_state": {"name": "Front Door Sensor"},
+            "proposed_changes": {"name": "Back Door Sensor"},
+        }
+        mock_cm_sensors.require_public_api_key.assert_not_called()
+        mock_cm_sensors.client.get_sensor_public.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_name_only_apply_renames_through_session_without_public_api(self, mock_cm_sensors):
+        from unifi_core.protect.managers.sensor_manager import SensorManager
+
+        sensor = mock_cm_sensors.client.bootstrap.sensors["sensor-001"]
+        sensor.set_name = AsyncMock()
+        mock_cm_sensors.require_public_api_key = MagicMock(side_effect=AssertionError("public API not expected"))
+        mock_cm_sensors.client.update_sensor_public = AsyncMock()
+        mgr = SensorManager(mock_cm_sensors)
+
+        result = await mgr.apply_sensor_settings("sensor-001", {"name": "Back Door Sensor"})
+
+        sensor.set_name.assert_awaited_once_with("Back Door Sensor")
+        assert result["sensor_id"] == "sensor-001"
+        assert result["applied"] == {"name": "Back Door Sensor"}
+        mock_cm_sensors.require_public_api_key.assert_not_called()
+        mock_cm_sensors.client.update_sensor_public.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_name_only_unknown_sensor_raises_not_found(self, mock_cm_sensors):
+        from unifi_core.protect.managers.sensor_manager import SensorManager
+
+        mgr = SensorManager(mock_cm_sensors)
+
+        with pytest.raises(UniFiNotFoundError):
+            await mgr.update_sensor_settings("missing", {"name": "Back Door Sensor"})
+        with pytest.raises(UniFiNotFoundError):
+            await mgr.apply_sensor_settings("missing", {"name": "Back Door Sensor"})
+
+    @pytest.mark.asyncio
+    async def test_name_with_other_settings_still_uses_public_api(self):
+        from unifi_core.protect.managers.sensor_manager import SensorManager
+
+        cm = MagicMock()
+        cm.require_public_api_key = MagicMock()
+        cm.client.update_sensor_public = AsyncMock(return_value=_make_public_sensor(name="Garage"))
+        mgr = SensorManager(cm)
+
+        await mgr.apply_sensor_settings("sensor-001", {"name": "Garage", "schedule_mode": "always"})
+
+        cm.require_public_api_key.assert_called_once_with("update sensor settings")
+        cm.client.update_sensor_public.assert_awaited_once_with("sensor-001", name="Garage", schedule_mode="always")
 
 
 # ===========================================================================

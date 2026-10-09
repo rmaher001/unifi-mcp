@@ -2,7 +2,9 @@
 
 Provides methods to list UniFi Protect sensor devices (motion, door/window,
 temperature, humidity, light level, leak detection) via the uiprotect
-bootstrap data and update settings through the Protect public API.
+bootstrap data and update settings through the Protect public API. A rename
+alone goes through the session instead, as it does for lights and chimes, so it
+needs no API key.
 """
 
 from __future__ import annotations
@@ -28,6 +30,17 @@ class SensorManager:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _get_sensor(self, sensor_id: str):
+        """Retrieve a Sensor object by ID, raising UniFiNotFoundError if not found."""
+        sensor = self._cm.client.bootstrap.sensors.get(sensor_id)
+        if sensor is None:
+            raise UniFiNotFoundError("sensor", sensor_id)
+        return sensor
+
+    @staticmethod
+    def _is_rename_only(settings: Dict[str, Any]) -> bool:
+        return set(settings) == {"name"}
 
     @staticmethod
     def _format_sensor_summary(sensor) -> Dict[str, Any]:
@@ -126,6 +139,15 @@ class SensorManager:
 
     async def update_sensor_settings(self, sensor_id: str, settings: Dict[str, Any]) -> Dict[str, Any]:
         """Return current and proposed sensor settings for preview."""
+        if self._is_rename_only(settings):
+            sensor = self._get_sensor(sensor_id)
+            return {
+                "sensor_id": sensor_id,
+                "sensor_name": sensor.name,
+                "current_state": {"name": sensor.name},
+                "proposed_changes": {"name": settings["name"]},
+            }
+
         self._cm.require_public_api_key("update sensor settings")
         try:
             sensor = await self._cm.client.get_sensor_public(sensor_id)
@@ -149,6 +171,16 @@ class SensorManager:
 
     async def apply_sensor_settings(self, sensor_id: str, settings: Dict[str, Any]) -> Dict[str, Any]:
         """Apply sensor settings through the Protect public API after confirmation."""
+        if self._is_rename_only(settings):
+            sensor = self._get_sensor(sensor_id)
+            await sensor.set_name(str(settings["name"]))
+            return {
+                "sensor_id": sensor_id,
+                "sensor_name": sensor.name,
+                "applied": {"name": settings["name"]},
+                "updated_state": {"name": sensor.name},
+            }
+
         self._cm.require_public_api_key("update sensor settings")
         try:
             sensor = await self._cm.client.update_sensor_public(sensor_id, **settings)

@@ -1,5 +1,7 @@
 import asyncio
+import contextlib
 import logging
+import os
 import re
 import time
 import time as _time
@@ -1511,7 +1513,10 @@ class ConnectionManager:
                 return SessionDownload(status=response.status, size_bytes=0)
             await asyncio.to_thread(dest.parent.mkdir, parents=True, exist_ok=True)
             partial = dest.with_name(f"{dest.name}.{token_hex(4)}.part")
-            handle = await asyncio.to_thread(partial.open, "wb")
+            # Opened without awaiting, so a cancellation cannot fall between
+            # creating the file and owning its cleanup; owner-only, since a
+            # support file holds the controller's logs and configuration.
+            handle = os.fdopen(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb")
             size = 0
             try:
                 try:
@@ -1523,7 +1528,8 @@ class ConnectionManager:
                 await asyncio.to_thread(handle.close)
                 await asyncio.to_thread(partial.replace, dest)
             except BaseException:
-                handle.close()
+                with contextlib.suppress(OSError):
+                    handle.close()  # flushing may fail again, e.g. on a full disk
                 partial.unlink(missing_ok=True)
                 raise
             return SessionDownload(status=200, size_bytes=size)

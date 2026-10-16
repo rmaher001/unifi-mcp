@@ -4,6 +4,8 @@ Unifi Network MCP system tools.
 This module provides MCP tools to interact with a Unifi Network Controller's system functions.
 """
 
+import asyncio
+import contextlib
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -530,6 +532,13 @@ async def create_backup(
         return {"success": False, "error": f"Failed to create backup: {e}"}
 
 
+def _remove_if_empty(path: Path) -> None:
+    """Remove a reserved support file that never received data; a file holding data is kept."""
+    with contextlib.suppress(OSError):
+        if path.stat().st_size == 0:
+            path.unlink()
+
+
 def support_file_directory() -> Path:
     """The folder support files are saved to, on the machine running this server."""
     configured = str(config.network.support_files.directory or "").strip()
@@ -546,10 +555,12 @@ def support_file_directory() -> Path:
     description="Have the controller generate a support file - the .tgz that vendor support asks for - for one "
     "device (target='device' with its mac_address: an AP, switch or other adopted device) or for the UniFi OS console "
     "itself (target='console'), wait for it, and save it in the support-file folder on the machine running this "
-    "server (UNIFI_NETWORK_SUPPORT_FILE_DIR, default ~/unifi-support-files) as "
-    "<name>-support-<date>-<time>-<zone>.tgz. Returns the saved path, size and time, never the contents. "
-    "Takes about a minute (longer for the console); the controller hands out each generated file only once. "
-    "Needs username/password session authentication. Requires confirmation.",
+    "server (UNIFI_NETWORK_SUPPORT_FILE_DIR, an absolute path or ~/..., default ~/unifi-support-files) as "
+    "<name>-support-<date>-<time>-<zone>.tgz, stamped with the time of the request and readable only by the "
+    "server's user. Returns the saved path, size and request time, never the contents. Takes about a minute "
+    "(longer for the console); requests for the same device or for the console run one at a time, and the "
+    "controller hands out each generated file only once. Needs username/password session authentication. "
+    "Requires confirmation.",
     permission_category="system",
     permission_action="create",
     annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False),
@@ -603,7 +614,8 @@ async def generate_support_file(
                 resource_name=name,
             )
 
-        dest = reserve_support_file(directory, name, datetime.now().astimezone())
+        requested = datetime.now().astimezone()
+        dest = await asyncio.to_thread(reserve_support_file, directory, name, requested)
         if mac is not None:
             saved = await support_file_manager.generate_device_support_file(mac, dest)
         else:
@@ -614,12 +626,14 @@ async def generate_support_file(
                 **details,
                 "path": str(saved.path),
                 "size_bytes": saved.size_bytes,
-                "saved_at": datetime.now().astimezone().isoformat(),
+                "requested_at": requested.isoformat(),
             },
         }
-    except Exception as e:
-        if dest is not None and dest.exists() and dest.stat().st_size == 0:
-            dest.unlink()
+    except BaseException as e:
+        if dest is not None:
+            await asyncio.shield(asyncio.to_thread(_remove_if_empty, dest))
+        if not isinstance(e, Exception):
+            raise  # cancellation: cleaned up, but not turned into a result
         logger.error("Error generating support file: %s", type(e).__name__)
         return {"success": False, "error": f"Failed to generate support file: {e}"}
 

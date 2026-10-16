@@ -4,6 +4,8 @@ import re
 import time
 import time as _time
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import aiohttp
@@ -96,6 +98,19 @@ _UNREACHABLE_REQUEST_PREFIX = "Error requesting data from "
 # token after the first whitespace-free run following "Call ". The URL and the
 # body may contain any digits and are never consulted.
 _RESPONSE_STATUS_RE = re.compile(r"^Call \S+ received (\d{3})(?!\d)")
+
+
+@dataclass(frozen=True)
+class SessionDownload:
+    """The outcome of :meth:`ConnectionManager.session_download`.
+
+    ``size_bytes`` is what was written to disk, so it is 0 for any status but
+    200; ``filename`` is the controller's own ``filename`` header, if any.
+    """
+
+    status: int
+    size_bytes: int
+    filename: Optional[str]
 
 
 class SettingsControllerRejection(RequestError):
@@ -1395,6 +1410,76 @@ class ConnectionManager:
     def _rejection_level(api_request: ApiRequest | ApiRequestV2) -> int:
         """A controller's negative answer is routine on a read, worth a warning on a write."""
         return logging.INFO if api_request.method.lower() == "get" else logging.WARNING
+
+    def _session_url(self, path: str) -> str:
+        """The URL of a plain absolute path on this controller, such as ``/api/system``."""
+        if not path.startswith("/") or path.startswith("//") or ".." in path or "?" in path or "#" in path:
+            raise ValueError("Controller path must be a plain absolute path.")
+        return f"{self.url_base}{path}"
+
+    async def _open_session_request(
+        self, method: str, path: str, payload: Mapping[str, Any] | None = None
+    ) -> aiohttp.ClientResponse:
+        """Send one request on the logged-in session, logging in again once if it has expired.
+
+        Unlike :meth:`request`, the path is used as given (no site or
+        ``/proxy/network`` prefix is added) and the response is returned
+        unread, so a large body can be streamed. The caller releases it.
+        """
+        url = self._session_url(path)
+        if self._key_mode:
+            raise UniFiAuthError(
+                "This operation requires Network session authentication. "
+                "Configure UNIFI_NETWORK_USERNAME and UNIFI_NETWORK_PASSWORD."
+            )
+        for attempt in range(2):
+            if not await self.ensure_connected() or not self.controller:
+                raise self._not_connected_error()
+            generation = self._auth_generation
+            connectivity = self.controller.connectivity
+            response = await connectivity.config.session.request(
+                method,
+                url,
+                json=payload,
+                headers=connectivity.headers,
+                ssl=connectivity.config.ssl_context,
+                allow_redirects=False,
+            )
+            if response.status != 401 or attempt:
+                return response
+            response.release()
+            if not await self._reauthenticate(generation):
+                raise UniFiAuthError("The controller session expired and logging in again failed.")
+        raise AssertionError("unreachable")
+
+    async def session_post(self, path: str, payload: Mapping[str, Any] | None) -> int:
+        """POST ``payload`` as JSON to a controller path on the logged-in session; return the status."""
+        async with await self._open_session_request("post", path, payload) as response:
+            return response.status
+
+    async def session_download(self, path: str, dest: Path) -> SessionDownload:
+        """Stream a controller path to ``dest`` on the logged-in session.
+
+        Only a 200 writes anything. The body goes to ``<dest>.part`` and is
+        renamed into place when complete, so ``dest`` never holds a partial
+        file; on any failure the partial file is removed.
+        """
+        async with await self._open_session_request("get", path) as response:
+            if response.status != 200:
+                return SessionDownload(status=response.status, size_bytes=0, filename=None)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            partial = dest.with_name(f"{dest.name}.part")
+            size = 0
+            try:
+                with partial.open("wb") as handle:
+                    async for chunk in response.content.iter_chunked(1 << 16):
+                        handle.write(chunk)
+                        size += len(chunk)
+                partial.replace(dest)
+            except BaseException:
+                partial.unlink(missing_ok=True)
+                raise
+            return SessionDownload(status=200, size_bytes=size, filename=response.headers.get("filename"))
 
     async def request(self, api_request: ApiRequest | ApiRequestV2) -> Any:
         """Request controller data, keeping settings failures safe for every caller."""

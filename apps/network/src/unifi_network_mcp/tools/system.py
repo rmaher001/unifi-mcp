@@ -14,7 +14,7 @@ from pydantic import Field, WithJsonSchema
 
 from unifi_core.confirmation import create_preview, delete_preview, update_preview
 from unifi_core.mac import canonical_mac
-from unifi_core.network.managers.support_file_manager import support_file_path
+from unifi_core.network.managers.support_file_manager import reserve_support_file
 from unifi_core.network.models.mdns import mdns_to_controller_update, validate_mdns_service_selection
 from unifi_core.network.models.system import (
     autobackup_to_controller_update,
@@ -532,7 +532,13 @@ async def create_backup(
 
 def support_file_directory() -> Path:
     """The folder support files are saved to, on the machine running this server."""
-    return Path(str(config.network.support_files.directory)).expanduser()
+    configured = str(config.network.support_files.directory or "").strip()
+    directory = Path(configured).expanduser()
+    if not configured or not directory.is_absolute():
+        raise ValueError(
+            f"UNIFI_NETWORK_SUPPORT_FILE_DIR must be an absolute folder path or start with ~ (it is {configured!r})."
+        )
+    return directory
 
 
 @server.tool(
@@ -569,43 +575,52 @@ async def generate_support_file(
     logger.info("unifi_generate_support_file tool called (target=%s, confirm=%s)", target, confirm)
     if target not in ("device", "console"):
         return {"success": False, "error": "target must be 'device' or 'console'."}
-    if target == "device" and not mac_address:
-        return {"success": False, "error": "A device MAC address is required when target is 'device'."}
+    mac = canonical_mac(mac_address) if target == "device" else None
+    if target == "device" and mac is None:
+        return {
+            "success": False,
+            "error": "A device MAC address (e.g. aa:bb:cc:dd:ee:ff) is required when target is 'device'.",
+        }
 
+    dest: Optional[Path] = None
     try:
-        if target == "device":
-            device = await device_manager.get_device_details(mac_address)
-            name = getattr(device, "name", None) or mac_address
+        support_file_manager.require_session_auth()
+        directory = support_file_directory()
+        if mac is not None:
+            device = await device_manager.get_device_details(mac)
+            name = getattr(device, "name", None) or mac
         else:
             info = await system_manager.get_system_info()
             name = info.get("hostname") or info.get("name") or "console"
-        directory = support_file_directory()
+        details: Dict[str, Any] = {"target": target, "name": name}
+        if mac is not None:
+            details["mac"] = mac
 
         if not confirm:
-            details = {"target": target, "name": name, "directory": str(directory)}
-            if target == "device":
-                details["mac"] = canonical_mac(mac_address) or mac_address
-            return create_preview(resource_type="support_file", resource_data=details, resource_name=name)
+            return create_preview(
+                resource_type="support_file",
+                resource_data={**details, "directory": str(directory)},
+                resource_name=name,
+            )
 
-        when = datetime.now().astimezone()
-        dest = support_file_path(directory, name, when)
-        if target == "device":
-            saved = await support_file_manager.generate_device_support_file(mac_address, dest)
+        dest = reserve_support_file(directory, name, datetime.now().astimezone())
+        if mac is not None:
+            saved = await support_file_manager.generate_device_support_file(mac, dest)
         else:
             saved = await support_file_manager.generate_console_support_file(dest)
-
-        data = {
-            "target": target,
-            "name": name,
-            "path": str(saved.path),
-            "size_bytes": saved.size_bytes,
-            "generated_at": when.isoformat(),
+        return {
+            "success": True,
+            "data": {
+                **details,
+                "path": str(saved.path),
+                "size_bytes": saved.size_bytes,
+                "saved_at": datetime.now().astimezone().isoformat(),
+            },
         }
-        if target == "device":
-            data["mac"] = canonical_mac(mac_address) or mac_address
-        return {"success": True, "data": data}
     except Exception as e:
-        logger.error("Error generating support file: %s", e, exc_info=True)
+        if dest is not None and dest.exists() and dest.stat().st_size == 0:
+            dest.unlink()
+        logger.error("Error generating support file: %s", type(e).__name__)
         return {"success": False, "error": f"Failed to generate support file: {e}"}
 
 

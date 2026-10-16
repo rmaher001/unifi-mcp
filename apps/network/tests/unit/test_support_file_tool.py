@@ -80,7 +80,7 @@ async def test_a_confirmed_device_file_is_saved_under_the_device_name(mocks) -> 
     assert data["target"] == "device"
     assert data["name"] == "Kitchen AP"
     assert data["mac"] == MAC
-    assert "saved_at" in data
+    assert "requested_at" in data
     mocks.support.generate_device_support_file.assert_awaited_once_with(MAC, path)
 
 
@@ -102,7 +102,7 @@ async def test_the_response_never_carries_the_file_contents(mocks) -> None:
 
     result = await generate_support_file(target="console", confirm=True)
 
-    assert set(result["data"]) == {"target", "name", "path", "size_bytes", "saved_at"}
+    assert set(result["data"]) == {"target", "name", "path", "size_bytes", "requested_at"}
 
 
 async def test_a_device_target_needs_a_mac(mocks) -> None:
@@ -161,8 +161,10 @@ def test_the_folder_comes_from_config_and_expands_home(monkeypatch) -> None:
     assert system.support_file_directory() == Path.home() / "unifi-support-files"
 
 
-def test_the_default_folder_is_documented_in_config() -> None:
+def test_the_default_folder_is_documented_in_config(monkeypatch) -> None:
     from unifi_network_mcp.bootstrap import load_config
+
+    monkeypatch.delenv("UNIFI_NETWORK_SUPPORT_FILE_DIR", raising=False)
 
     assert load_config().network.support_files.directory == "~/unifi-support-files"
 
@@ -227,17 +229,25 @@ async def test_a_nameless_device_or_console_still_gets_a_telling_name(mocks) -> 
 
 
 async def test_the_file_name_carries_the_local_date_time_and_zone(mocks) -> None:
-    from datetime import datetime
+    from datetime import datetime, timedelta, timezone
 
     from unifi_network_mcp.tools.system import generate_support_file
 
-    result = await generate_support_file(target="console", confirm=True)
+    frozen = datetime(2026, 10, 16, 6, 19, 42, tzinfo=timezone(timedelta(hours=-7), "PDT"))
 
-    stamp = datetime.now().astimezone()
-    zone = stamp.strftime("%Z")
-    name = Path(result["data"]["path"]).name
-    assert stamp.strftime("%Y-%m-%d") in name and name.endswith(f"-{zone}.tgz")
-    assert datetime.fromisoformat(result["data"]["saved_at"]).tzinfo is not None
+    reads = []
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            reads.append(None)
+            return frozen + timedelta(minutes=len(reads) - 1)  # a minute later on every read
+
+    with patch(f"{MODULE}.datetime", Clock):
+        result = await generate_support_file(target="console", confirm=True)
+
+    assert Path(result["data"]["path"]).name == "Console-One-support-2026-10-16-0619-PDT.tgz"
+    assert result["data"]["requested_at"] == "2026-10-16T06:19:42-07:00"
 
 
 async def test_a_failed_generation_leaves_no_empty_file_behind(mocks) -> None:
@@ -282,3 +292,59 @@ def test_an_empty_or_relative_folder_is_refused(monkeypatch, value) -> None:
 
     with pytest.raises(ValueError, match="UNIFI_NETWORK_SUPPORT_FILE_DIR"):
         system.support_file_directory()
+
+
+async def test_a_cancelled_call_leaves_no_empty_file_behind(mocks) -> None:
+    import asyncio
+
+    from unifi_network_mcp.tools.system import generate_support_file
+
+    mocks.support.generate_console_support_file.side_effect = asyncio.CancelledError()
+
+    with pytest.raises(asyncio.CancelledError):
+        await generate_support_file(target="console", confirm=True)
+    assert list(mocks.directory.iterdir()) == []
+
+
+async def test_a_file_that_already_holds_data_is_never_removed(mocks) -> None:
+    from unifi_network_mcp.tools.system import generate_support_file
+
+    def written_then_failed(dest):
+        dest.write_bytes(b"\x1f\x8bpartly checked")
+        raise RuntimeError("late failure")
+
+    mocks.support.generate_console_support_file.side_effect = written_then_failed
+
+    result = await generate_support_file(target="console", confirm=True)
+
+    assert result["success"] is False
+    assert len(list(mocks.directory.iterdir())) == 1
+
+
+def test_surrounding_spaces_in_the_folder_setting_are_ignored(monkeypatch) -> None:
+    from unifi_network_mcp.tools import system
+
+    monkeypatch.setattr(
+        system,
+        "config",
+        SimpleNamespace(network=SimpleNamespace(support_files=SimpleNamespace(directory="  /srv/support  "))),
+    )
+
+    assert system.support_file_directory() == Path("/srv/support")
+
+
+def test_the_tool_is_gated_as_a_system_create(monkeypatch) -> None:
+    import json
+
+    from unifi_core.policy_gate import PolicyGateChecker
+    from unifi_network_mcp.categories import NETWORK_CATEGORY_MAP
+
+    manifest = json.loads(
+        (Path(__file__).resolve().parents[2] / "src/unifi_network_mcp/tools_manifest.json").read_text()
+    )
+    entry = next(tool for tool in manifest["tools"] if tool["name"] == "unifi_generate_support_file")
+    assert (entry["permission_category"], entry["permission_action"]) == ("system", "create")
+
+    monkeypatch.setenv("UNIFI_POLICY_NETWORK_SYSTEM_CREATE", "false")
+    checker = PolicyGateChecker("network", NETWORK_CATEGORY_MAP)
+    assert checker.check("system", "create") is False

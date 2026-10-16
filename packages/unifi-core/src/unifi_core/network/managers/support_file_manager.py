@@ -129,14 +129,17 @@ class SupportFileManager:
             deadline = self._clock() + self._timeout
             status = await self._device_support_status(device)
             if status == READY_TO_GENERATE:
-                await self._connection.request(ApiRequestV2(method="post", path=f"/support/{device}/generation"))
+                await self._connection.request(
+                    ApiRequestV2(method="post", path=f"/support/{device}/generation", data={})
+                )
                 status = GENERATING
             while status != READY_TO_DOWNLOAD:
                 await self._wait(deadline)
                 status = await self._device_support_status(device)
                 if status == READY_TO_GENERATE:
                     raise RuntimeError(
-                        "The controller stopped generating the device support file; the device may be offline."
+                        "The controller is not generating the device support file: it did not start, "
+                        "or it stopped (the device may be offline)."
                     )
 
             path = self._connection.network_path(ApiRequestV2(method="get", path=f"/support/{device}/download"))

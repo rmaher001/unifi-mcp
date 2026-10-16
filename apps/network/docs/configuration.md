@@ -22,6 +22,7 @@ The Network server supports server-specific environment variables with the `UNIF
 | `UNIFI_NETWORK_WEBSOCKET_ENABLED` | -- | No | `true` | Start the real-time event listener that feeds `unifi_recent_events` |
 | `UNIFI_NETWORK_EVENT_BUFFER_SIZE` | -- | No | `100` | Positive maximum events held in the websocket ring buffer; invalid values prevent startup |
 | `UNIFI_NETWORK_EVENT_BUFFER_TTL` | -- | No | `300` | Positive seconds before buffered events expire; invalid values prevent startup |
+| `UNIFI_NETWORK_SUPPORT_FILE_DIR` | -- | No | `~/unifi-support-files` | Folder, on the machine running the server, where `unifi_generate_support_file` saves device and console support files |
 
 **Resolution order:** `UNIFI_NETWORK_*` > `UNIFI_*` > YAML config > hardcoded default.
 

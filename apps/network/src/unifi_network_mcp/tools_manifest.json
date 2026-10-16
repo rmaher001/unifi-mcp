@@ -1,5 +1,5 @@
 {
-  "count": 210,
+  "count": 211,
   "generated_by": "scripts/generate_tool_manifest.py",
   "module_map": {
     "unifi_adopt_device": "unifi_network_mcp.tools.devices",
@@ -52,6 +52,7 @@
     "unifi_force_provision_device": "unifi_network_mcp.tools.devices",
     "unifi_force_reconnect_client": "unifi_network_mcp.tools.clients",
     "unifi_forget_client": "unifi_network_mcp.tools.clients",
+    "unifi_generate_support_file": "unifi_network_mcp.tools.system",
     "unifi_get_acl_rule_details": "unifi_network_mcp.tools.acl",
     "unifi_get_alerts": "unifi_network_mcp.tools.stats",
     "unifi_get_anomalies": "unifi_network_mcp.tools.stats",
@@ -6680,6 +6681,111 @@
         }
       },
       "title": "Forget Client"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "auth_method": "local_only",
+      "description": "Have the controller generate a support file - the .tgz that vendor support asks for - for one device (target='device' with its mac_address: an AP, switch or other adopted device) or for the UniFi OS console itself (target='console'), wait for it, and save it in the support-file folder on the machine running this server (UNIFI_NETWORK_SUPPORT_FILE_DIR, default ~/unifi-support-files) as <name>-support-<date>-<time>-<zone>.tgz. Returns the saved path, size and time, never the contents. Takes about a minute (longer for the console); the controller hands out each generated file only once. Needs username/password session authentication. Requires confirmation.",
+      "name": "unifi_generate_support_file",
+      "permission_action": "create",
+      "permission_category": "system",
+      "schema": {
+        "input": {
+          "properties": {
+            "confirm": {
+              "description": "When true, generates and saves the file. When false (default), returns a preview",
+              "type": "boolean"
+            },
+            "mac_address": {
+              "description": "Device MAC address in format AA:BB:CC:DD:EE:FF (from unifi_list_devices). Required when target is 'device'",
+              "type": "string"
+            },
+            "target": {
+              "description": "'device' for an AP, switch or other adopted device; 'console' for the UniFi OS console",
+              "type": "string"
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "type": "object"
+        },
+        "output": {
+          "additionalProperties": true,
+          "description": "Structured view of the existing UniFi MCP tool response contract.",
+          "properties": {
+            "data": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Successful result payload.",
+              "title": "Data"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Actionable error message for handled failures.",
+              "title": "Error"
+            },
+            "preview": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Mutation preview payload returned before confirmation.",
+              "title": "Preview"
+            },
+            "requires_confirmation": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "True when a mutation preview requires caller confirmation.",
+              "title": "Requires Confirmation"
+            },
+            "success": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "True when the tool call succeeded; false for handled errors.",
+              "title": "Success"
+            }
+          },
+          "title": "UniFiToolResponse",
+          "type": "object"
+        }
+      },
+      "title": "Generate Support File"
     },
     {
       "annotations": {

@@ -5,12 +5,16 @@ This module provides MCP tools to interact with a Unifi Network Controller's sys
 """
 
 import logging
-from typing import Annotated, Any, Dict, Optional
+from datetime import datetime
+from pathlib import Path
+from typing import Annotated, Any, Dict, Literal, Optional
 
 from mcp.types import ToolAnnotations
 from pydantic import Field, WithJsonSchema
 
 from unifi_core.confirmation import create_preview, delete_preview, update_preview
+from unifi_core.mac import canonical_mac
+from unifi_core.network.managers.support_file_manager import support_file_path
 from unifi_core.network.models.mdns import mdns_to_controller_update, validate_mdns_service_selection
 from unifi_core.network.models.system import (
     autobackup_to_controller_update,
@@ -30,7 +34,14 @@ from unifi_core.network.models.threat_management import (
 )
 from unifi_core.redaction import redact_sensitive_fields
 from unifi_core.write_verification import format_tool_payload
-from unifi_network_mcp.runtime import server, should_redact_sensitive_fields, system_manager
+from unifi_network_mcp.runtime import (
+    config,
+    device_manager,
+    server,
+    should_redact_sensitive_fields,
+    support_file_manager,
+    system_manager,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -517,6 +528,85 @@ async def create_backup(
     except Exception as e:
         logger.error("Error creating backup: %s", e, exc_info=True)
         return {"success": False, "error": f"Failed to create backup: {e}"}
+
+
+def support_file_directory() -> Path:
+    """The folder support files are saved to, on the machine running this server."""
+    return Path(str(config.network.support_files.directory)).expanduser()
+
+
+@server.tool(
+    name="unifi_generate_support_file",
+    description="Have the controller generate a support file - the .tgz that vendor support asks for - for one "
+    "device (target='device' with its mac_address: an AP, switch or other adopted device) or for the UniFi OS console "
+    "itself (target='console'), wait for it, and save it in the support-file folder on the machine running this "
+    "server (UNIFI_NETWORK_SUPPORT_FILE_DIR, default ~/unifi-support-files) as "
+    "<name>-support-<date>-<time>-<zone>.tgz. Returns the saved path, size and time, never the contents. "
+    "Takes about a minute (longer for the console); the controller hands out each generated file only once. "
+    "Needs username/password session authentication. Requires confirmation.",
+    permission_category="system",
+    permission_action="create",
+    annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False),
+)
+async def generate_support_file(
+    target: Annotated[
+        Literal["device", "console"],
+        Field(description="'device' for an AP, switch or other adopted device; 'console' for the UniFi OS console"),
+    ],
+    mac_address: Annotated[
+        Optional[str],
+        Field(
+            description="Device MAC address in format AA:BB:CC:DD:EE:FF (from unifi_list_devices). "
+            "Required when target is 'device'"
+        ),
+    ] = None,
+    confirm: Annotated[
+        bool,
+        Field(description="When true, generates and saves the file. When false (default), returns a preview"),
+    ] = False,
+) -> Dict[str, Any]:
+    """Generate a device or console support file and save it locally."""
+    logger.info("unifi_generate_support_file tool called (target=%s, confirm=%s)", target, confirm)
+    if target not in ("device", "console"):
+        return {"success": False, "error": "target must be 'device' or 'console'."}
+    if target == "device" and not mac_address:
+        return {"success": False, "error": "A device MAC address is required when target is 'device'."}
+
+    try:
+        if target == "device":
+            device = await device_manager.get_device_details(mac_address)
+            name = getattr(device, "name", None) or mac_address
+        else:
+            info = await system_manager.get_system_info()
+            name = info.get("hostname") or info.get("name") or "console"
+        directory = support_file_directory()
+
+        if not confirm:
+            details = {"target": target, "name": name, "directory": str(directory)}
+            if target == "device":
+                details["mac"] = canonical_mac(mac_address) or mac_address
+            return create_preview(resource_type="support_file", resource_data=details, resource_name=name)
+
+        when = datetime.now().astimezone()
+        dest = support_file_path(directory, name, when)
+        if target == "device":
+            saved = await support_file_manager.generate_device_support_file(mac_address, dest)
+        else:
+            saved = await support_file_manager.generate_console_support_file(dest)
+
+        data = {
+            "target": target,
+            "name": name,
+            "path": str(saved.path),
+            "size_bytes": saved.size_bytes,
+            "generated_at": when.isoformat(),
+        }
+        if target == "device":
+            data["mac"] = canonical_mac(mac_address) or mac_address
+        return {"success": True, "data": data}
+    except Exception as e:
+        logger.error("Error generating support file: %s", e, exc_info=True)
+        return {"success": False, "error": f"Failed to generate support file: {e}"}
 
 
 @server.tool(

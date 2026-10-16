@@ -22,7 +22,9 @@ The console file is a UniFi OS endpoint outside ``/proxy/network``:
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -43,6 +45,27 @@ DEVICE_ALREADY_TAKEN = 400
 CONSOLE_GENERATE_PATH = "/api/support/file/generate"
 CONSOLE_DOWNLOAD_PATH = "/api/support/file/download"
 CONSOLE_NOT_READY = 423
+
+
+_UNSAFE_NAME_RUN = re.compile(r"[^A-Za-z0-9._]+")
+
+
+def support_file_path(directory: Path, label: str | None, when: dt.datetime) -> Path:
+    """Where to save a support file: ``<label>-support-YYYY-MM-DD-HHMM-<TZ>.tgz`` in ``directory``.
+
+    ``label`` is the device or console name, reduced to letters, digits, ``.``
+    and ``_`` joined by single hyphens, so it can never leave ``directory``.
+    The time is shown in ``when``'s own zone. An existing file is never
+    overwritten: a ``-2``, ``-3``, ... suffix is added instead.
+    """
+    stem = _UNSAFE_NAME_RUN.sub("-", label or "").strip("-.") or "unifi"
+    base = f"{stem}-support-{when.strftime('%Y-%m-%d-%H%M')}-{when.strftime('%Z') or 'local'}"
+    candidate = directory / f"{base}.tgz"
+    suffix = 2
+    while candidate.exists():
+        candidate = directory / f"{base}-{suffix}.tgz"
+        suffix += 1
+    return candidate
 
 
 @dataclass(frozen=True)

@@ -9,13 +9,14 @@ timeouts are exercised without waiting.
 
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 from typing import Any
 
 import pytest
 from aiounifi.models.api import ApiRequestV2
 from unifi_core.network.managers.connection_manager import SessionDownload
-from unifi_core.network.managers.support_file_manager import SupportFile, SupportFileManager
+from unifi_core.network.managers.support_file_manager import SupportFile, SupportFileManager, support_file_path
 
 MAC = "aa:bb:cc:dd:ee:ff"
 DEVICE_DOWNLOAD = f"/proxy/network/v2/api/site/default/support/{MAC}/download"
@@ -216,3 +217,34 @@ async def test_a_device_download_failing_for_another_reason_reports_its_status(t
     with pytest.raises(RuntimeError, match="HTTP 502") as raised:
         await manager(connection, Clock()).generate_device_support_file(MAC, tmp_path / "ap.tgz")
     assert "only once" not in str(raised.value)
+
+
+# ---- naming ----
+
+PDT = dt.timezone(dt.timedelta(hours=-7), "PDT")
+WHEN = dt.datetime(2026, 10, 16, 6, 19, 42, tzinfo=PDT)
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("U7-Pro-Wall-Kitchen", "U7-Pro-Wall-Kitchen-support-2026-10-16-0619-PDT.tgz"),
+        ("USW Flex 2.5G 8 PoE - Garage", "USW-Flex-2.5G-8-PoE-Garage-support-2026-10-16-0619-PDT.tgz"),
+        ("../../etc/passwd", "etc-passwd-support-2026-10-16-0619-PDT.tgz"),
+        ("  ", "unifi-support-2026-10-16-0619-PDT.tgz"),
+        (None, "unifi-support-2026-10-16-0619-PDT.tgz"),
+    ],
+)
+def test_the_file_name_says_which_device_and_when(tmp_path, label, expected) -> None:
+    assert support_file_path(tmp_path, label, WHEN) == tmp_path / expected
+
+
+def test_an_existing_file_is_never_overwritten(tmp_path) -> None:
+    first = support_file_path(tmp_path, "AP", WHEN)
+    first.write_bytes(b"earlier")
+    second = support_file_path(tmp_path, "AP", WHEN)
+    second.write_bytes(b"later")
+
+    assert second == tmp_path / "AP-support-2026-10-16-0619-PDT-2.tgz"
+    assert support_file_path(tmp_path, "AP", WHEN) == tmp_path / "AP-support-2026-10-16-0619-PDT-3.tgz"
+    assert first.read_bytes() == b"earlier"

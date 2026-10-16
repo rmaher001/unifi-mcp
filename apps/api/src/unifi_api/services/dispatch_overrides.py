@@ -243,10 +243,15 @@ _INCIDENT_EVIDENCE_EXCLUSION_REASON = (
     "bounded multi-read evidence collection is served by dedicated incident-evidence routes; "
     "the action dispatcher invokes a single manager method"
 )
+_SUPPORT_FILE_EXCLUSION_REASON = (
+    "waits for the controller to build a support file and saves it to the MCP server's own disk; "
+    "the action dispatcher invokes a single manager method and returns JSON"
+)
 API_ACTION_EXCLUSIONS: dict[str, ActionExclusion] = {
     "access_subscribe_events": ActionExclusion("access", _MCP_SUBSCRIPTION_EXCLUSION_REASON),
     "protect_subscribe_events": ActionExclusion("protect", _MCP_SUBSCRIPTION_EXCLUSION_REASON),
     "unifi_create_traffic_route": ActionExclusion("network", _TRAFFIC_ROUTE_CREATE_ACTION_EXCLUSION_REASON),
+    "unifi_generate_support_file": ActionExclusion("network", _SUPPORT_FILE_EXCLUSION_REASON),
     "unifi_get_incident_evidence": ActionExclusion("network", _INCIDENT_EVIDENCE_EXCLUSION_REASON),
     "protect_get_incident_evidence": ActionExclusion("protect", _INCIDENT_EVIDENCE_EXCLUSION_REASON),
     "unifi_subscribe_events": ActionExclusion("network", _MCP_SUBSCRIPTION_EXCLUSION_REASON),

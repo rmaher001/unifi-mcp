@@ -9,38 +9,49 @@ timeouts are exercised without waiting.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from aiounifi.models.api import ApiRequestV2
 from unifi_core.network.managers.connection_manager import SessionDownload
-from unifi_core.network.managers.support_file_manager import SupportFile, SupportFileManager, support_file_path
+from unifi_core.network.managers.support_file_manager import SupportFile, SupportFileManager, reserve_support_file
 
 MAC = "aa:bb:cc:dd:ee:ff"
+GZIP_BODY = b"\x1f\x8bfixture"
 DEVICE_DOWNLOAD = f"/proxy/network/v2/api/site/default/support/{MAC}/download"
 CONSOLE_DOWNLOAD = "/api/support/file/download"
 
 
 class Connection:
     site = "default"
+    is_unifi_os = True
 
-    def __init__(self, statuses: list[str] | None = None, downloads: list[int] | None = None) -> None:
+    def __init__(
+        self, statuses: list[str] | None = None, downloads: list[int] | None = None, body: bytes = GZIP_BODY
+    ) -> None:
         self.statuses = list(statuses or [])
         self.downloads = list(downloads or [200])
+        self.body = body
+        self.authentication_status = SimpleNamespace(session_configured=True)
         self.calls: list[tuple[str, str]] = []
         self.posted: list[tuple[str, Any]] = []
 
     def network_path(self, api_request: ApiRequestV2) -> str:
         return api_request.full_path(self.site, True)
 
+    async def ensure_connected(self) -> bool:
+        return True
+
     async def request(self, api_request: ApiRequestV2) -> Any:
         assert isinstance(api_request, ApiRequestV2)
         self.calls.append((api_request.method, api_request.path))
         if api_request.method == "get":
             status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
-            return [{"mac": MAC, "status": status}]
+            return status if not isinstance(status, str) else [{"mac": MAC, "status": status}]
         return [{}]
 
     async def session_post(self, path: str, payload: Any) -> int:
@@ -52,10 +63,10 @@ class Connection:
         self.calls.append(("download", path))
         status = self.downloads.pop(0) if len(self.downloads) > 1 else self.downloads[0]
         if status != 200:
-            return SessionDownload(status=status, size_bytes=0, filename=None)
+            return SessionDownload(status=status, size_bytes=0)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(b"\x1f\x8bfixture")
-        return SessionDownload(status=200, size_bytes=9, filename="fixture.tgz")
+        dest.write_bytes(self.body)
+        return SessionDownload(status=200, size_bytes=len(self.body))
 
 
 class Clock:
@@ -70,6 +81,7 @@ class Clock:
         assert len(self.sleeps) < 1000, "polled without ever giving up"
         self.sleeps.append(seconds)
         self.now += seconds
+        await asyncio.sleep(0)  # yield like a real sleep, so concurrent callers interleave
 
 
 def manager(connection: Connection, clock: Clock, *, timeout: float = 60) -> SupportFileManager:
@@ -86,7 +98,7 @@ async def test_a_device_file_is_generated_waited_for_and_downloaded(tmp_path) ->
 
     result = await manager(connection, clock).generate_device_support_file(MAC, dest)
 
-    assert result == SupportFile(path=dest, size_bytes=9)
+    assert result == SupportFile(path=dest, size_bytes=len(GZIP_BODY))
     assert connection.calls == [
         ("get", f"/support/{MAC}"),
         ("post", f"/support/{MAC}/generation"),
@@ -169,7 +181,7 @@ async def test_the_console_file_is_generated_then_downloaded_once_ready(tmp_path
 
     result = await manager(connection, clock).generate_console_support_file(dest)
 
-    assert result == SupportFile(path=dest, size_bytes=9)
+    assert result == SupportFile(path=dest, size_bytes=len(GZIP_BODY))
     assert connection.posted == [("/api/support/file/generate", {"recreate": True})]
     assert connection.calls == [
         ("post", "/api/support/file/generate"),
@@ -231,20 +243,112 @@ WHEN = dt.datetime(2026, 10, 16, 6, 19, 42, tzinfo=PDT)
         ("U7-Pro-Wall-Kitchen", "U7-Pro-Wall-Kitchen-support-2026-10-16-0619-PDT.tgz"),
         ("USW Flex 2.5G 8 PoE - Garage", "USW-Flex-2.5G-8-PoE-Garage-support-2026-10-16-0619-PDT.tgz"),
         ("../../etc/passwd", "etc-passwd-support-2026-10-16-0619-PDT.tgz"),
+        ("Küche AP", "Küche-AP-support-2026-10-16-0619-PDT.tgz"),
+        ("客厅", "客厅-support-2026-10-16-0619-PDT.tgz"),
+        ("A" * 300, "A" * 64 + "-support-2026-10-16-0619-PDT.tgz"),
         ("  ", "unifi-support-2026-10-16-0619-PDT.tgz"),
         (None, "unifi-support-2026-10-16-0619-PDT.tgz"),
     ],
 )
 def test_the_file_name_says_which_device_and_when(tmp_path, label, expected) -> None:
-    assert support_file_path(tmp_path, label, WHEN) == tmp_path / expected
+    assert reserve_support_file(tmp_path, label, WHEN) == tmp_path / expected
 
 
 def test_an_existing_file_is_never_overwritten(tmp_path) -> None:
-    first = support_file_path(tmp_path, "AP", WHEN)
+    first = reserve_support_file(tmp_path, "AP", WHEN)
     first.write_bytes(b"earlier")
-    second = support_file_path(tmp_path, "AP", WHEN)
+    second = reserve_support_file(tmp_path, "AP", WHEN)
     second.write_bytes(b"later")
 
     assert second == tmp_path / "AP-support-2026-10-16-0619-PDT-2.tgz"
-    assert support_file_path(tmp_path, "AP", WHEN) == tmp_path / "AP-support-2026-10-16-0619-PDT-3.tgz"
+    assert reserve_support_file(tmp_path, "AP", WHEN) == tmp_path / "AP-support-2026-10-16-0619-PDT-3.tgz"
     assert first.read_bytes() == b"earlier"
+
+
+def test_reserving_creates_the_file_so_a_concurrent_caller_gets_another_name(tmp_path) -> None:
+    first = reserve_support_file(tmp_path, "AP", WHEN)
+    assert first.exists() and first.stat().st_size == 0
+    assert reserve_support_file(tmp_path, "AP", WHEN) != first
+
+
+def test_the_zone_is_reduced_to_safe_characters(tmp_path) -> None:
+    offset = dt.datetime(2026, 10, 16, 6, 19, tzinfo=dt.timezone(dt.timedelta(hours=5, minutes=30)))
+    assert reserve_support_file(tmp_path, "AP", offset).name == "AP-support-2026-10-16-0619-UTC-05-30.tgz"
+    spelled = dt.datetime(2026, 10, 16, 6, 19, tzinfo=dt.timezone(dt.timedelta(hours=-7), "Pacific Daylight Time"))
+    assert reserve_support_file(tmp_path, "AP", spelled).name == (
+        "AP-support-2026-10-16-0619-Pacific-Daylight-Time.tgz"
+    )
+
+
+def test_a_time_without_a_zone_says_local(tmp_path) -> None:
+    naive = dt.datetime(2026, 10, 16, 6, 19)
+    assert reserve_support_file(tmp_path, "AP", naive).name == "AP-support-2026-10-16-0619-local.tgz"
+
+
+# ---- what the controller hands back ----
+
+
+@pytest.mark.parametrize("body", [b"", b"<html>login</html>"])
+async def test_a_download_that_is_not_a_support_archive_is_discarded(tmp_path, body) -> None:
+    connection = Connection(statuses=["READY_TO_DOWNLOAD"], body=body)
+    dest = tmp_path / "ap.tgz"
+
+    with pytest.raises(RuntimeError, match="not a support file"):
+        await manager(connection, Clock()).generate_device_support_file(MAC, dest)
+    assert not dest.exists()
+
+
+async def test_a_generation_the_controller_drops_is_reported_not_waited_out(tmp_path) -> None:
+    connection = Connection(statuses=["READY_TO_GENERATE", "GENERATING", "READY_TO_GENERATE"])
+    clock = Clock()
+
+    with pytest.raises(RuntimeError, match="stopped generating"):
+        await manager(connection, clock, timeout=600).generate_device_support_file(MAC, tmp_path / "ap.tgz")
+    assert clock.now < 600
+
+
+@pytest.mark.parametrize("rows", [[], {}, ["READY_TO_DOWNLOAD"]])
+async def test_a_status_reply_of_the_wrong_shape_is_an_error(tmp_path, rows) -> None:
+    connection = Connection(statuses=[rows])
+
+    with pytest.raises(RuntimeError, match="Unexpected support-file status"):
+        await manager(connection, Clock()).generate_device_support_file(MAC, tmp_path / "ap.tgz")
+
+
+async def test_the_console_file_needs_a_unifi_os_console(tmp_path) -> None:
+    connection = Connection()
+    connection.is_unifi_os = False
+
+    with pytest.raises(RuntimeError, match="UniFi OS"):
+        await manager(connection, Clock()).generate_console_support_file(tmp_path / "console.tgz")
+    assert connection.calls == []
+
+
+async def test_a_controller_without_session_credentials_is_refused_first(tmp_path) -> None:
+    from unifi_core.exceptions import UniFiAuthError
+
+    connection = Connection(statuses=["READY_TO_GENERATE"])
+    connection.authentication_status = SimpleNamespace(session_configured=False)
+    support = manager(connection, Clock())
+
+    with pytest.raises(UniFiAuthError, match="session authentication"):
+        support.require_session_auth()
+    with pytest.raises(UniFiAuthError):
+        await support.generate_device_support_file(MAC, tmp_path / "ap.tgz")
+    with pytest.raises(UniFiAuthError):
+        await support.generate_console_support_file(tmp_path / "console.tgz")
+    assert connection.calls == []
+
+
+async def test_two_console_requests_run_one_after_the_other(tmp_path) -> None:
+    connection = Connection(downloads=[423, 200, 423, 200])
+    support = manager(connection, Clock())
+
+    await asyncio.gather(
+        support.generate_console_support_file(tmp_path / "one.tgz"),
+        support.generate_console_support_file(tmp_path / "two.tgz"),
+    )
+
+    kinds = [kind for kind, _ in connection.calls]
+    # the second generate starts only after the first file is down
+    assert kinds == ["post", "download", "download", "post", "download", "download"]

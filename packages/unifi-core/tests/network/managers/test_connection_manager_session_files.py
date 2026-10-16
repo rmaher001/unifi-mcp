@@ -7,9 +7,13 @@ ones the console issued, not values the test planted.
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+from aiounifi.models.api import ApiRequestV2
+from unifi_core.exceptions import UniFiAuthError
 from unifi_core.network.managers.connection_manager import ConnectionManager, SessionDownload
 
 from tests.network.local_tls import tls_context
@@ -163,10 +167,6 @@ async def test_paths_must_be_plain_absolute_paths_on_the_controller(connected, t
 
 
 async def test_api_key_mode_is_refused_before_anything_is_sent(tmp_path) -> None:
-    from unifi_core.exceptions import UniFiAuthError
-
-    from unittest.mock import AsyncMock
-
     connection = ConnectionManager("controller.invalid", "", "")
     connection._key_mode = True
     connection.ensure_connected = AsyncMock(return_value=True)
@@ -176,3 +176,21 @@ async def test_api_key_mode_is_refused_before_anything_is_sent(tmp_path) -> None
     with pytest.raises(UniFiAuthError, match="session authentication"):
         await connection.session_post("/api/support/file/generate", {})
     connection.ensure_connected.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("override", "detected", "expected"),
+    [
+        (True, False, "/proxy/network/v2/api/site/branch/support/aa:bb:cc:dd:ee:ff"),
+        (False, True, "/v2/api/site/branch/support/aa:bb:cc:dd:ee:ff"),
+        (None, True, "/proxy/network/v2/api/site/branch/support/aa:bb:cc:dd:ee:ff"),
+        (None, False, "/v2/api/site/branch/support/aa:bb:cc:dd:ee:ff"),
+    ],
+)
+def test_network_path_is_the_path_request_would_send_to(override, detected, expected) -> None:
+    connection = ConnectionManager("controller.invalid", "fixture-user", "fixture-password", site="branch")
+    connection._unifi_os_override = override
+    connection.controller = MagicMock()
+    connection.controller.connectivity.is_unifi_os = detected
+
+    assert connection.network_path(ApiRequestV2(method="get", path="/support/aa:bb:cc:dd:ee:ff")) == expected

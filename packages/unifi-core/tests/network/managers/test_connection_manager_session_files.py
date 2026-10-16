@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
+import aiohttp
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
@@ -26,6 +27,9 @@ PAYLOAD = b"\x1f\x8b" + bytes(range(256)) * 4096  # ~1 MiB, gzip magic first
 class Console:
     """A UniFi OS console with a support-file style download and a JSON POST."""
 
+    def expire_current_session(self) -> None:
+        self.expired_session = f"fixture-session-{self.logins}"
+
     def __init__(self) -> None:
         self.seen: list[tuple[str, str, str | None, str | None]] = []
         self.logins = 0
@@ -36,6 +40,8 @@ class Console:
         self.redirect_download = False
         self.stall_seconds = 0.0
         self.post_status = 200
+        self.expired_session: str | None = None
+        self.refusals = 0
         self.posted: list[object] = []
         app = web.Application()
         app.router.add_route("*", "/{tail:.*}", self.handle)
@@ -54,11 +60,17 @@ class Console:
             return response
         if path.endswith("/self/sites"):
             return web.json_response({"meta": {"rc": "ok"}, "data": [{"name": "default", "desc": "Default"}]})
+        if self.expired_session is not None and request.cookies.get("TOKEN") == self.expired_session:
+            # Each later request is refused later, after the first has logged in again.
+            self.refusals += 1
+            await asyncio.sleep(0.2 * self.refusals)
+            return web.json_response({"error": "unauthorized"}, status=401)
         if request.cookies.get("TOKEN") != f"fixture-session-{self.logins}":
             return web.json_response({"error": "unauthorized"}, status=401)
         if self.expire_session_once or self.always_unauthorized:
             self.expire_session_once = False
-            return web.json_response({"error": "unauthorized"}, status=401)
+            # Large enough that aiohttp cannot free the connection by itself having read it all.
+            return web.Response(status=401, body=b"x" * (4 << 20))
         if self.redirect_download and path == "/api/support/file/download":
             raise web.HTTPFound("https://elsewhere.invalid/steal")
         if path == "/api/support/file/generate" and request.method == "POST":
@@ -278,3 +290,108 @@ def test_is_unifi_os_follows_the_override_then_detection() -> None:
     assert connection.is_unifi_os is True
     connection._unifi_os_override = False
     assert connection.is_unifi_os is False
+
+
+async def test_a_controller_that_cannot_be_reached_is_reported_without_its_address(connected, tmp_path) -> None:
+    connection, _ = connected
+
+    async def refused(*args, **kwargs):
+        raise aiohttp.ClientOSError(61, "Cannot connect to host 127.0.0.1:8443 ssl:default [Connect call failed]")
+
+    connection.controller.connectivity.config.session.request = refused
+
+    for call in (
+        connection.session_download("/api/support/file/download", tmp_path / "x.tgz"),
+        connection.session_post("/api/support/file/generate", {}),
+    ):
+        with pytest.raises(RequestError) as raised:
+            await call
+        assert str(raised.value) == "Error requesting data from the controller: ClientOSError"
+
+
+async def test_a_terminal_refusal_drops_the_session(connected, tmp_path) -> None:
+    connection, console = connected
+    console.always_unauthorized = True
+
+    with pytest.raises(UniFiAuthError):
+        await connection.session_download("/api/support/file/download", tmp_path / "x.tgz")
+    assert connection.controller is None and connection._aiohttp_session is None
+
+
+async def test_every_response_is_released_including_refused_ones(connected, tmp_path) -> None:
+    connection, console = connected
+    connector = connection._aiohttp_session.connector
+    console.expire_session_once = True
+    await connection.session_download("/api/support/file/download", tmp_path / "a.tgz")
+    console.redirect_download = True
+    await connection.session_download("/api/support/file/download", tmp_path / "b.tgz")
+    console.redirect_download = False
+    console.download_status = 423
+    await connection.session_download("/api/support/file/download", tmp_path / "c.tgz")
+
+    assert not connector._acquired  # no connection left checked out
+
+
+async def test_concurrent_requests_on_an_expired_session_log_in_again_only_once(connected, tmp_path) -> None:
+    connection, console = connected
+    console.expire_current_session()
+
+    await asyncio.gather(
+        connection.session_download("/api/support/file/download", tmp_path / "a.tgz"),
+        connection.session_download("/api/support/file/download", tmp_path / "b.tgz"),
+    )
+    assert console.logins == 2
+
+
+async def test_a_download_is_bounded_by_silence_not_by_its_length(connected, tmp_path) -> None:
+    connection, _ = connected
+    session = connection.controller.connectivity.config.session
+    seen = {}
+    real = session.request
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    session.request = spy
+    await connection.session_download("/api/support/file/download", tmp_path / "x.tgz", read_timeout=45)
+
+    timeout = seen["timeout"]
+    assert (timeout.total, timeout.sock_connect, timeout.sock_read) == (None, 30, 45)
+
+
+async def test_a_stale_partial_file_is_left_alone(connected, tmp_path) -> None:
+    connection, _ = connected
+    stale = tmp_path / "x.tgz.part"
+    stale.write_bytes(b"someone else's")
+
+    await connection.session_download("/api/support/file/download", tmp_path / "x.tgz")
+
+    assert stale.read_bytes() == b"someone else's"
+    assert (tmp_path / "x.tgz").read_bytes() == PAYLOAD
+
+
+async def test_a_cancelled_download_leaves_no_file(connected, tmp_path) -> None:
+    connection, console = connected
+    console.stall_seconds = 5
+    downloads = tmp_path / "downloads"
+    task = asyncio.create_task(connection.session_download("/api/support/file/download", downloads / "x.tgz"))
+    for _ in range(100):
+        await asyncio.sleep(0.02)
+        if downloads.exists() and any(downloads.iterdir()):
+            break
+    assert any(downloads.iterdir()), "the partial file never appeared"
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert list(downloads.iterdir()) == []
+
+
+async def test_a_downloaded_file_is_readable_only_by_its_owner(connected, tmp_path) -> None:
+    connection, _ = connected
+    dest = tmp_path / "x.tgz"
+
+    await connection.session_download("/api/support/file/download", dest)
+
+    assert dest.stat().st_mode & 0o777 == 0o600

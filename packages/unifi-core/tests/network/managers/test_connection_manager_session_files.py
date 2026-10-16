@@ -7,11 +7,13 @@ ones the console issued, not values the test planted.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+from aiounifi.errors import RequestError
 from aiounifi.models.api import ApiRequestV2
 from unifi_core.exceptions import UniFiAuthError
 from unifi_core.network.managers.connection_manager import ConnectionManager, SessionDownload
@@ -30,6 +32,10 @@ class Console:
         self.expire_session_once = False
         self.download_status = 200
         self.drop_mid_stream = False
+        self.always_unauthorized = False
+        self.redirect_download = False
+        self.stall_seconds = 0.0
+        self.post_status = 200
         self.posted: list[object] = []
         app = web.Application()
         app.router.add_route("*", "/{tail:.*}", self.handle)
@@ -50,12 +56,14 @@ class Console:
             return web.json_response({"meta": {"rc": "ok"}, "data": [{"name": "default", "desc": "Default"}]})
         if request.cookies.get("TOKEN") != f"fixture-session-{self.logins}":
             return web.json_response({"error": "unauthorized"}, status=401)
-        if self.expire_session_once:
+        if self.expire_session_once or self.always_unauthorized:
             self.expire_session_once = False
             return web.json_response({"error": "unauthorized"}, status=401)
+        if self.redirect_download and path == "/api/support/file/download":
+            raise web.HTTPFound("https://elsewhere.invalid/steal")
         if path == "/api/support/file/generate" and request.method == "POST":
             self.posted.append(await request.json())
-            return web.json_response({})
+            return web.json_response({}, status=self.post_status)
         if path == "/api/support/file/download":
             if self.download_status != 200:
                 return web.json_response({"code": "SUPPORT_FILE_NOT_READY"}, status=self.download_status)
@@ -64,6 +72,8 @@ class Console:
             await response.prepare(request)
             for start in range(0, len(PAYLOAD), 65536):
                 await response.write(PAYLOAD[start : start + 65536])
+                if self.stall_seconds and start >= len(PAYLOAD) // 2:
+                    await asyncio.sleep(self.stall_seconds)
                 if self.drop_mid_stream and start >= len(PAYLOAD) // 2:
                     request.transport.close()
                     return response
@@ -92,7 +102,7 @@ async def test_a_download_streams_to_disk_with_the_session_cookie_and_csrf_heade
 
     result = await connection.session_download("/api/support/file/download", dest)
 
-    assert result == SessionDownload(status=200, size_bytes=len(PAYLOAD), filename="support-fixture.tgz")
+    assert result == SessionDownload(status=200, size_bytes=len(PAYLOAD))
     assert dest.read_bytes() == PAYLOAD
     method, _, csrf, cookie = console.seen[-1]
     assert (method, csrf, cookie) == ("GET", "fixture-csrf-1", "fixture-session-1")
@@ -106,7 +116,7 @@ async def test_a_refused_download_writes_nothing_and_reports_the_status(connecte
 
     result = await connection.session_download("/api/support/file/download", dest)
 
-    assert result == SessionDownload(status=423, size_bytes=0, filename=None)
+    assert result == SessionDownload(status=423, size_bytes=0)
     assert not dest.exists()
     assert not list(tmp_path.glob("*.part"))
 
@@ -149,12 +159,17 @@ async def test_a_connection_dropped_mid_stream_leaves_no_file(connected, tmp_pat
     downloads = tmp_path / "downloads"
     dest = downloads / "console.tgz"
 
-    with pytest.raises(Exception):  # noqa: B017 - whichever transport error aiohttp raises
+    with pytest.raises(RequestError) as raised:
         await connection.session_download("/api/support/file/download", dest)
     assert list(downloads.iterdir()) == []
+    # the safe form: classified as a transport failure, no URL or address in it
+    assert str(raised.value).startswith("Error requesting data from ")
+    assert "127.0.0.1" not in str(raised.value) and "/api/" not in str(raised.value)
 
 
-@pytest.mark.parametrize("path", ["api/support/file/download", "/api/../secret", "https://elsewhere/x", "/a?b=c"])
+@pytest.mark.parametrize(
+    "path", ["api/support/file/download", "/api/../secret", "https://elsewhere/x", "/a?b=c", "//elsewhere/x", "/a#b"]
+)
 async def test_paths_must_be_plain_absolute_paths_on_the_controller(connected, tmp_path, path) -> None:
     connection, console = connected
     before = len(console.seen)
@@ -194,3 +209,72 @@ def test_network_path_is_the_path_request_would_send_to(override, detected, expe
     connection.controller.connectivity.is_unifi_os = detected
 
     assert connection.network_path(ApiRequestV2(method="get", path="/support/aa:bb:cc:dd:ee:ff")) == expected
+
+
+async def test_a_redirect_is_never_followed_with_the_session(connected, tmp_path) -> None:
+    connection, console = connected
+    console.redirect_download = True
+
+    result = await connection.session_download("/api/support/file/download", tmp_path / "x.tgz")
+
+    assert result.status == 302
+    assert not (tmp_path / "x.tgz").exists()
+
+
+async def test_a_post_reports_the_controllers_status(connected) -> None:
+    connection, console = connected
+    console.post_status = 403
+
+    assert await connection.session_post("/api/support/file/generate", {"recreate": True}) == 403
+
+
+async def test_a_session_refused_again_after_logging_in_stops_further_logins(connected, tmp_path) -> None:
+    connection, console = connected
+    console.always_unauthorized = True
+
+    with pytest.raises(UniFiAuthError, match="after logging in again"):
+        await connection.session_download("/api/support/file/download", tmp_path / "x.tgz")
+    assert console.logins == 2
+    # like request(): the refused session is terminal, so a later call does not log in again
+    with pytest.raises(Exception):  # noqa: B017 - not connected, whichever form ensure_connected reports
+        await connection.session_post("/api/support/file/generate", {})
+    assert console.logins == 2
+
+
+async def test_a_failed_login_after_expiry_is_an_auth_error(connected, tmp_path) -> None:
+    connection, console = connected
+    console.expire_session_once = True
+    connection._reauthenticate = AsyncMock(return_value=False)
+
+    with pytest.raises(UniFiAuthError, match="logging in again failed"):
+        await connection.session_download("/api/support/file/download", tmp_path / "x.tgz")
+
+
+async def test_no_connection_is_reported_before_anything_is_sent(tmp_path) -> None:
+    connection = ConnectionManager("controller.invalid", "fixture-user", "fixture-password")
+    connection.ensure_connected = AsyncMock(return_value=False)
+
+    with pytest.raises(ConnectionError):
+        await connection.session_download("/api/support/file/download", tmp_path / "x.tgz")
+
+
+async def test_a_slow_steady_download_is_not_cut_off_but_a_stalled_one_is(connected, tmp_path) -> None:
+    connection, console = connected
+    console.stall_seconds = 0.4
+
+    result = await connection.session_download("/api/support/file/download", tmp_path / "a.tgz", read_timeout=2)
+    assert result.size_bytes == len(PAYLOAD)
+
+    with pytest.raises(RequestError):
+        await connection.session_download("/api/support/file/download", tmp_path / "b.tgz", read_timeout=0.1)
+    assert not (tmp_path / "b.tgz").exists()
+
+
+def test_is_unifi_os_follows_the_override_then_detection() -> None:
+    connection = ConnectionManager("controller.invalid", "fixture-user", "fixture-password")
+    assert connection.is_unifi_os is False  # not connected, nothing detected
+    connection.controller = MagicMock()
+    connection.controller.connectivity.is_unifi_os = True
+    assert connection.is_unifi_os is True
+    connection._unifi_os_override = False
+    assert connection.is_unifi_os is False

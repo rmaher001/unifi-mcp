@@ -38,6 +38,7 @@ class Connection:
         self.body = body
         self.authentication_status = SimpleNamespace(session_configured=True, api_key_available=None)
         self.calls: list[tuple[str, str]] = []
+        self.bodies: list[Any] = []
         self.posted: list[tuple[str, Any]] = []
 
     def network_path(self, api_request: ApiRequestV2) -> str:
@@ -49,6 +50,7 @@ class Connection:
     async def request(self, api_request: ApiRequestV2) -> Any:
         assert isinstance(api_request, ApiRequestV2)
         self.calls.append((api_request.method, api_request.path))
+        self.bodies.append(api_request.data)
         if api_request.method == "get":
             status = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
             return status if not isinstance(status, str) else [{"mac": MAC, "status": status}]
@@ -302,7 +304,7 @@ async def test_a_generation_the_controller_drops_is_reported_not_waited_out(tmp_
     connection = Connection(statuses=["READY_TO_GENERATE", "GENERATING", "READY_TO_GENERATE"])
     clock = Clock()
 
-    with pytest.raises(RuntimeError, match="stopped generating"):
+    with pytest.raises(RuntimeError, match="not generating"):
         await manager(connection, clock, timeout=600).generate_device_support_file(MAC, tmp_path / "ap.tgz")
     assert clock.now < 600
 
@@ -434,3 +436,13 @@ def test_a_reserved_file_and_a_new_folder_are_private(tmp_path) -> None:
 
     assert path.stat().st_mode & 0o777 == 0o600
     assert path.parent.stat().st_mode & 0o777 == 0o700
+
+
+async def test_the_generate_request_carries_an_empty_json_object(tmp_path) -> None:
+    """The controller ignores a body-less POST (seen live); the web UI sends {}."""
+    connection = Connection(statuses=["READY_TO_GENERATE", "READY_TO_DOWNLOAD"])
+
+    await manager(connection, Clock()).generate_device_support_file(MAC, tmp_path / "ap.tgz")
+
+    post = connection.calls.index(("post", f"/support/{MAC}/generation"))
+    assert connection.bodies[post] == {}

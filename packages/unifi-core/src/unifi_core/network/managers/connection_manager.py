@@ -6,6 +6,7 @@ import time as _time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from secrets import token_hex
 from typing import Any, Dict, Optional
 
 import aiohttp
@@ -104,13 +105,11 @@ _RESPONSE_STATUS_RE = re.compile(r"^Call \S+ received (\d{3})(?!\d)")
 class SessionDownload:
     """The outcome of :meth:`ConnectionManager.session_download`.
 
-    ``size_bytes`` is what was written to disk, so it is 0 for any status but
-    200; ``filename`` is the controller's own ``filename`` header, if any.
+    ``size_bytes`` is what was written to disk, so it is 0 for any status but 200.
     """
 
     status: int
     size_bytes: int
-    filename: Optional[str]
 
 
 class SettingsControllerRejection(RequestError):
@@ -1411,12 +1410,16 @@ class ConnectionManager:
         """A controller's negative answer is routine on a read, worth a warning on a write."""
         return logging.INFO if api_request.method.lower() == "get" else logging.WARNING
 
+    @property
+    def is_unifi_os(self) -> bool:
+        """Whether Network requests go through UniFi OS (``/proxy/network``), as :meth:`request` decides it."""
+        if self._unifi_os_override is not None:
+            return self._unifi_os_override
+        return bool(self.controller and getattr(self.controller.connectivity, "is_unifi_os", False))
+
     def network_path(self, api_request: ApiRequest | ApiRequestV2) -> str:
         """The controller path :meth:`request` sends ``api_request`` to, site and prefix included."""
-        is_unifi_os = self._unifi_os_override
-        if is_unifi_os is None:
-            is_unifi_os = bool(self.controller and self.controller.connectivity.is_unifi_os)
-        return api_request.full_path(self.site, is_unifi_os)
+        return api_request.full_path(self.site, self.is_unifi_os)
 
     def _session_url(self, path: str) -> str:
         """The URL of a plain absolute path on this controller, such as ``/api/system``."""
@@ -1424,26 +1427,21 @@ class ConnectionManager:
             raise ValueError("Controller path must be a plain absolute path.")
         return f"{self.url_base}{path}"
 
-    async def _open_session_request(
-        self, method: str, path: str, payload: Mapping[str, Any] | None = None
-    ) -> aiohttp.ClientResponse:
-        """Send one request on the logged-in session, logging in again once if it has expired.
+    @staticmethod
+    def _session_transport_error(error: BaseException) -> RequestError:
+        """The transport failure in the form aiounifi gives it, without the URL or the controller's text."""
+        return RequestError(f"{_UNREACHABLE_REQUEST_PREFIX}the controller: {type(error).__name__}")
 
-        Unlike :meth:`request`, the path is used as given (no site or
-        ``/proxy/network`` prefix is added) and the response is returned
-        unread, so a large body can be streamed. The caller releases it.
-        """
-        url = self._session_url(path)
-        if self._key_mode:
-            raise UniFiAuthError(
-                "This operation requires Network session authentication. "
-                "Configure UNIFI_NETWORK_USERNAME and UNIFI_NETWORK_PASSWORD."
-            )
-        for attempt in range(2):
-            if not await self.ensure_connected() or not self.controller:
-                raise self._not_connected_error()
-            generation = self._auth_generation
-            connectivity = self.controller.connectivity
+    async def _send_session_request(
+        self, method: str, url: str, payload: Mapping[str, Any] | None, timeout: aiohttp.ClientTimeout | None
+    ) -> tuple[aiohttp.ClientResponse, int]:
+        """Send once on the logged-in session; return the unread response and the login generation it used."""
+        if not await self.ensure_connected() or not self.controller:
+            raise self._not_connected_error()
+        generation = self._auth_generation
+        connectivity = self.controller.connectivity
+        options: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}
+        try:
             response = await connectivity.config.session.request(
                 method,
                 url,
@@ -1451,42 +1449,85 @@ class ConnectionManager:
                 headers=connectivity.headers,
                 ssl=connectivity.config.ssl_context,
                 allow_redirects=False,
+                **options,
             )
-            if response.status != 401 or attempt:
-                return response
+        except (aiohttp.ClientError, asyncio.TimeoutError) as error:
+            raise self._session_transport_error(error) from None
+        return response, generation
+
+    async def _open_session_request(
+        self,
+        method: str,
+        path: str,
+        payload: Mapping[str, Any] | None = None,
+        timeout: aiohttp.ClientTimeout | None = None,
+    ) -> aiohttp.ClientResponse:
+        """Send one request on the logged-in session, logging in again once if it has expired.
+
+        Unlike :meth:`request`, the path is used as given (no site or
+        ``/proxy/network`` prefix is added), redirects are never followed, and
+        the response is returned unread so a large body can be streamed. The
+        caller releases it. As in :meth:`request`, a session the controller
+        still refuses after logging in again is terminal: automatic logins
+        stop instead of repeating on every call.
+        """
+        url = self._session_url(path)
+        if self._key_mode:
+            raise UniFiAuthError(
+                "This operation requires Network session authentication. "
+                "Configure UNIFI_NETWORK_USERNAME and UNIFI_NETWORK_PASSWORD."
+            )
+        response, generation = await self._send_session_request(method, url, payload, timeout)
+        if response.status != 401:
+            return response
+        response.release()
+        if not await self._reauthenticate(generation):
+            raise UniFiAuthError("The controller session expired and logging in again failed.")
+        response, _ = await self._send_session_request(method, url, payload, timeout)
+        if response.status == 401:
             response.release()
-            if not await self._reauthenticate(generation):
-                raise UniFiAuthError("The controller session expired and logging in again failed.")
-        raise AssertionError("unreachable")
+            self._block_automatic_reconnect(LoginRequired(f"{method.upper()} refused after re-authentication"))
+            await self._discard_connection()
+            raise UniFiAuthError("The controller refused the session even after logging in again.")
+        return response
 
     async def session_post(self, path: str, payload: Mapping[str, Any] | None) -> int:
         """POST ``payload`` as JSON to a controller path on the logged-in session; return the status."""
         async with await self._open_session_request("post", path, payload) as response:
             return response.status
 
-    async def session_download(self, path: str, dest: Path) -> SessionDownload:
+    async def session_download(self, path: str, dest: Path, *, read_timeout: float = 60.0) -> SessionDownload:
         """Stream a controller path to ``dest`` on the logged-in session.
 
-        Only a 200 writes anything. The body goes to ``<dest>.part`` and is
-        renamed into place when complete, so ``dest`` never holds a partial
-        file; on any failure the partial file is removed.
+        Only a 200 writes anything. There is no limit on the whole transfer,
+        only on silence: ``read_timeout`` seconds without data ends it. The
+        body goes to a uniquely named ``.part`` file beside ``dest`` and is
+        renamed onto ``dest`` when complete, so ``dest`` never holds a partial
+        file; on any failure the partial file is removed. File writes run off
+        the event loop.
         """
-        async with await self._open_session_request("get", path) as response:
+        timeout = aiohttp.ClientTimeout(total=None, sock_connect=30, sock_read=read_timeout)
+        async with await self._open_session_request("get", path, timeout=timeout) as response:
             if response.status != 200:
-                return SessionDownload(status=response.status, size_bytes=0, filename=None)
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            partial = dest.with_name(f"{dest.name}.part")
+                return SessionDownload(status=response.status, size_bytes=0)
+            await asyncio.to_thread(dest.parent.mkdir, parents=True, exist_ok=True)
+            partial = dest.with_name(f"{dest.name}.{token_hex(4)}.part")
+            handle = await asyncio.to_thread(partial.open, "wb")
             size = 0
             try:
-                with partial.open("wb") as handle:
+                try:
                     async for chunk in response.content.iter_chunked(1 << 16):
-                        handle.write(chunk)
+                        await asyncio.to_thread(handle.write, chunk)
                         size += len(chunk)
-                partial.replace(dest)
+                except (aiohttp.ClientError, asyncio.TimeoutError) as error:
+                    raise self._session_transport_error(error) from None
+                await asyncio.to_thread(handle.close)
+                await asyncio.to_thread(partial.replace, dest)
             except BaseException:
+                handle.close()
                 partial.unlink(missing_ok=True)
                 raise
-            return SessionDownload(status=200, size_bytes=size, filename=response.headers.get("filename"))
+            return SessionDownload(status=200, size_bytes=size)
 
     async def request(self, api_request: ApiRequest | ApiRequestV2) -> Any:
         """Request controller data, keeping settings failures safe for every caller."""

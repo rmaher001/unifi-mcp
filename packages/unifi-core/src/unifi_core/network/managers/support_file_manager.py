@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import os
 import re
 import time
 from collections.abc import Awaitable, Callable
@@ -63,18 +64,19 @@ def reserve_support_file(directory: Path, label: str | None, when: dt.datetime) 
     ``label`` is the device or console name, reduced to word characters and
     ``.`` joined by single hyphens and cut to 64 characters, so it stays
     inside ``directory``. The time is shown in ``when``'s own zone. The file
-    is created exclusively, so neither an earlier file nor a concurrent caller
-    is ever overwritten: a ``-2``, ``-3``, ... suffix is added instead.
+    is created exclusively and readable only by its owner (a new folder too),
+    so neither an earlier file nor a concurrent caller is ever overwritten: a
+    ``-2``, ``-3``, ... suffix is added instead.
     """
     stem = _safe_part(label)[:MAX_LABEL_LENGTH].strip("-.") or "unifi"
     zone = _safe_part(when.strftime("%Z")) or "local"
     base = f"{stem}-support-{when.strftime('%Y-%m-%d-%H%M')}-{zone}"
-    directory.mkdir(parents=True, exist_ok=True)
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     suffix = 1
     while True:
         candidate = directory / (f"{base}.tgz" if suffix == 1 else f"{base}-{suffix}.tgz")
         try:
-            candidate.open("x").close()
+            os.close(os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
         except FileExistsError:
             suffix += 1
             continue
@@ -109,8 +111,9 @@ class SupportFileManager:
         self._locks: dict[str, asyncio.Lock] = {}
 
     def require_session_auth(self) -> None:
-        """Raise unless username/password session credentials are configured; API keys cannot do this."""
-        if not self._connection.authentication_status.session_configured:
+        """Raise unless the controller is reached with username/password, not an API key, which cannot do this."""
+        status = self._connection.authentication_status
+        if not status.session_configured or status.api_key_available:
             raise UniFiAuthError(
                 "Support files require Network session authentication. "
                 "Configure UNIFI_NETWORK_USERNAME and UNIFI_NETWORK_PASSWORD."
@@ -175,7 +178,9 @@ class SupportFileManager:
         return status
 
     def _lock(self, key: str) -> asyncio.Lock:
-        return self._locks.setdefault(key, asyncio.Lock())
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+        return self._locks[key]
 
     async def _checked(self, dest: Path, size: int) -> SupportFile:
         """Keep the download only if it is a gzip archive, as every support file is."""

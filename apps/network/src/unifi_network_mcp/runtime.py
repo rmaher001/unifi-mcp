@@ -58,6 +58,7 @@ from unifi_core.network.managers.oon_manager import OonManager
 from unifi_core.network.managers.qos_manager import QosManager
 from unifi_core.network.managers.routing_manager import RoutingManager
 from unifi_core.network.managers.stats_manager import StatsManager
+from unifi_core.network.managers.support_file_manager import SupportFileManager
 from unifi_core.network.managers.switch_manager import SwitchManager
 from unifi_core.network.managers.system_manager import SystemManager
 from unifi_core.network.managers.traffic_flow_manager import TrafficFlowManager
@@ -236,6 +237,11 @@ def get_switch_manager() -> SwitchManager:
 
 
 @lru_cache
+def get_support_file_manager() -> SupportFileManager:
+    return SupportFileManager(get_connection_manager())
+
+
+@lru_cache
 def get_system_manager() -> SystemManager:
     return SystemManager(get_connection_manager())
 
@@ -352,6 +358,7 @@ qos_manager = get_qos_manager()
 vpn_manager = get_vpn_manager()
 network_manager = get_network_manager()
 oon_manager = get_oon_manager()
+support_file_manager = get_support_file_manager()
 system_manager = get_system_manager()
 firewall_manager = get_firewall_manager()
 gateway_settings_manager = get_gateway_settings_manager()

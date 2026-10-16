@@ -36,7 +36,7 @@ class Connection:
         self.statuses = list(statuses or [])
         self.downloads = list(downloads or [200])
         self.body = body
-        self.authentication_status = SimpleNamespace(session_configured=True)
+        self.authentication_status = SimpleNamespace(session_configured=True, api_key_available=None)
         self.calls: list[tuple[str, str]] = []
         self.posted: list[tuple[str, Any]] = []
 
@@ -328,7 +328,7 @@ async def test_a_controller_without_session_credentials_is_refused_first(tmp_pat
     from unifi_core.exceptions import UniFiAuthError
 
     connection = Connection(statuses=["READY_TO_GENERATE"])
-    connection.authentication_status = SimpleNamespace(session_configured=False)
+    connection.authentication_status = SimpleNamespace(session_configured=False, api_key_available=None)
     support = manager(connection, Clock())
 
     with pytest.raises(UniFiAuthError, match="session authentication"):
@@ -352,3 +352,85 @@ async def test_two_console_requests_run_one_after_the_other(tmp_path) -> None:
     kinds = [kind for kind, _ in connection.calls]
     # the second generate starts only after the first file is down
     assert kinds == ["post", "download", "download", "post", "download", "download"]
+
+
+@pytest.mark.parametrize("body", [b"", b"<html>login</html>"])
+async def test_a_console_download_that_is_not_a_support_archive_is_discarded(tmp_path, body) -> None:
+    connection = Connection(body=body)
+    dest = tmp_path / "console.tgz"
+
+    with pytest.raises(RuntimeError, match="not a support file"):
+        await manager(connection, Clock()).generate_console_support_file(dest)
+    assert not dest.exists()
+
+
+async def test_the_console_check_waits_for_the_connection_to_know_the_controller_type(tmp_path) -> None:
+    connection = Connection()
+    connection.is_unifi_os = False  # unknown until connected
+
+    async def connect() -> bool:
+        connection.is_unifi_os = True
+        return True
+
+    connection.ensure_connected = connect
+
+    await manager(connection, Clock()).generate_console_support_file(tmp_path / "console.tgz")
+
+
+async def test_two_requests_for_the_same_device_run_one_after_the_other(tmp_path) -> None:
+    connection = Connection(
+        statuses=["READY_TO_GENERATE", "READY_TO_DOWNLOAD", "READY_TO_GENERATE", "READY_TO_DOWNLOAD"]
+    )
+    support = manager(connection, Clock())
+
+    await asyncio.gather(
+        support.generate_device_support_file(MAC, tmp_path / "one.tgz"),
+        support.generate_device_support_file(MAC, tmp_path / "two.tgz"),
+    )
+
+    kinds = [kind for kind, _ in connection.calls]
+    assert kinds == ["get", "post", "get", "download", "get", "post", "get", "download"]
+
+
+async def test_a_device_and_the_console_do_not_wait_for_each_other(tmp_path) -> None:
+    connection = Connection(statuses=["READY_TO_GENERATE", "GENERATING", "READY_TO_DOWNLOAD"], downloads=[423, 200])
+    support = manager(connection, Clock())
+
+    await asyncio.gather(
+        support.generate_device_support_file(MAC, tmp_path / "ap.tgz"),
+        support.generate_console_support_file(tmp_path / "console.tgz"),
+    )
+
+    paths = [path for _, path in connection.calls]
+    # the console starts before the device's file is down
+    assert paths.index("/api/support/file/generate") < paths.index(DEVICE_DOWNLOAD)
+
+
+async def test_waiting_right_up_to_the_deadline_is_allowed(tmp_path) -> None:
+    connection = Connection(statuses=["READY_TO_GENERATE", "GENERATING", "READY_TO_DOWNLOAD"])
+    clock = Clock()
+
+    await manager(connection, clock, timeout=10).generate_device_support_file(MAC, tmp_path / "ap.tgz")
+    assert clock.now == 10
+
+
+async def test_a_session_that_fell_back_to_an_api_key_is_refused(tmp_path) -> None:
+    from unifi_core.exceptions import UniFiAuthError
+
+    connection = Connection(statuses=["READY_TO_GENERATE"])
+    connection.authentication_status = SimpleNamespace(session_configured=True, api_key_available=True)
+
+    with pytest.raises(UniFiAuthError, match="session authentication"):
+        await manager(connection, Clock()).generate_device_support_file(MAC, tmp_path / "ap.tgz")
+    assert connection.calls == []
+
+
+def test_a_cut_name_does_not_end_in_a_separator(tmp_path) -> None:
+    assert reserve_support_file(tmp_path, "a" * 63 + " b", WHEN).name == "a" * 63 + "-support-2026-10-16-0619-PDT.tgz"
+
+
+def test_a_reserved_file_and_a_new_folder_are_private(tmp_path) -> None:
+    path = reserve_support_file(tmp_path / "new", "AP", WHEN)
+
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.parent.stat().st_mode & 0o777 == 0o700

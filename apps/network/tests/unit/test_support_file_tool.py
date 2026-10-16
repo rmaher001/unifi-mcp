@@ -228,20 +228,31 @@ async def test_a_nameless_device_or_console_still_gets_a_telling_name(mocks) -> 
     assert bare["data"]["name"] == "console"
 
 
-async def test_the_file_name_carries_the_local_date_time_and_zone(mocks) -> None:
-    from datetime import datetime, timedelta, timezone
+@pytest.fixture
+def pacific(monkeypatch):
+    """Run in a known local zone, as the server's own clock would be."""
+    import time
+
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+async def test_the_file_name_carries_the_local_date_time_and_zone(mocks, pacific) -> None:
+    from datetime import datetime, timedelta
 
     from unifi_network_mcp.tools.system import generate_support_file
 
-    frozen = datetime(2026, 10, 16, 6, 19, 42, tzinfo=timezone(timedelta(hours=-7), "PDT"))
-
+    local = datetime(2026, 10, 16, 6, 19, 42)  # naive local time, as datetime.now() returns
     reads = []
 
     class Clock(datetime):
         @classmethod
         def now(cls, tz=None):
             reads.append(None)
-            return frozen + timedelta(minutes=len(reads) - 1)  # a minute later on every read
+            return local + timedelta(minutes=len(reads) - 1)  # a minute later on every read
 
     with patch(f"{MODULE}.datetime", Clock):
         result = await generate_support_file(target="console", confirm=True)

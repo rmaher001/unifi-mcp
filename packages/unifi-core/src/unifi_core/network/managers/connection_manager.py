@@ -1410,6 +1410,13 @@ class ConnectionManager:
         """A controller's negative answer is routine on a read, worth a warning on a write."""
         return logging.INFO if api_request.method.lower() == "get" else logging.WARNING
 
+    def network_path(self, api_request: ApiRequest | ApiRequestV2) -> str:
+        """The controller path :meth:`request` sends ``api_request`` to, site and prefix included."""
+        is_unifi_os = self._unifi_os_override
+        if is_unifi_os is None:
+            is_unifi_os = bool(self.controller and self.controller.connectivity.is_unifi_os)
+        return api_request.full_path(self.site, is_unifi_os)
+
     def _session_url(self, path: str) -> str:
         """The URL of a plain absolute path on this controller, such as ``/api/system``."""
         if not path.startswith("/") or path.startswith("//") or ".." in path or "?" in path or "#" in path:

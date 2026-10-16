@@ -301,7 +301,7 @@ inspect its `mutation_applied` state and resource ID before retrying or cleaning
 - `unifi_update_dns_record` — Update a record (partial updates preserved)
 - `unifi_delete_dns_record` — Delete a record
 
-## System (12 tools)
+## System (13 tools)
 
 - `unifi_get_system_info` — Controller version, uptime, resource usage
 - `unifi_get_network_health` — Per-subsystem health (WAN, LAN, WLAN, VPN)
@@ -312,6 +312,7 @@ inspect its `mutation_applied` state and resource ID before retrying or cleaning
 - `unifi_list_backups` — List available backups on the controller
 - `unifi_create_backup` — Create a new backup of the controller configuration
 - `unifi_delete_backup` — Delete a backup file from the controller
+- `unifi_generate_support_file` — Generate a device's or the console's support file and save it on the server (`UNIFI_NETWORK_SUPPORT_FILE_DIR`)
 - `unifi_get_autobackup_settings` — Get auto-backup settings
 - `unifi_update_autobackup_settings` — Update auto-backup settings
 

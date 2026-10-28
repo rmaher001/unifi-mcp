@@ -2436,6 +2436,105 @@ async def test_dispatch_translates_export_clip_iso_to_datetime() -> None:
     assert keyword["fps"] == 4
 
 
+async def _dispatch_event_list(tool_name: str, method: str, args: dict) -> dict:
+    entry = ToolEntry(name=tool_name, product="protect", category="events", manager="", method="")
+    registry = _registry_with(entry)
+
+    domain_manager = MagicMock()
+    setattr(domain_manager, method, AsyncMock(return_value=[]))
+
+    factory = MagicMock()
+    factory.get_domain_manager = AsyncMock(return_value=domain_manager)
+    factory.get_connection_manager = AsyncMock(return_value=MagicMock(site=None))
+
+    await dispatch_action(
+        registry=registry,
+        factory=factory,
+        session=MagicMock(),
+        tool_name=tool_name,
+        controller_id="cid",
+        controller_products=["protect"],
+        site="default",
+        args=args,
+        confirm=True,
+        dispatch_table={tool_name: DispatchEntry(manager_attr="event_manager", method=method)},
+    )
+
+    manager_method = getattr(domain_manager, method)
+    manager_method.assert_awaited_once()
+    (positional, keyword) = manager_method.await_args
+    assert positional == ()
+    return keyword
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "method"),
+    [("protect_list_events", "list_events"), ("protect_list_smart_detections", "list_smart_detections")],
+)
+async def test_dispatch_event_list_start_only_defaults_end_to_now(tool_name, method) -> None:
+    """A one-sided range is rejected by the NVR above limit 100, so end defaults to now."""
+    from datetime import datetime, timezone
+
+    before = datetime.now(timezone.utc)
+    keyword = await _dispatch_event_list(tool_name, method, {"start": "2026-05-13T12:00:00Z", "limit": 200})
+    after = datetime.now(timezone.utc)
+
+    assert keyword["start"] == datetime(2026, 5, 13, 12, 0, 0, tzinfo=timezone.utc)
+    assert before <= keyword["end"] <= after
+    assert keyword["limit"] == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "method"),
+    [("protect_list_events", "list_events"), ("protect_list_smart_detections", "list_smart_detections")],
+)
+async def test_dispatch_event_list_end_only_defaults_start_to_24_hours_before(tool_name, method) -> None:
+    from datetime import datetime, timezone
+
+    keyword = await _dispatch_event_list(tool_name, method, {"end": "2026-05-13T12:00:00"})
+
+    assert keyword["start"] == datetime(2026, 5, 12, 12, 0, 0, tzinfo=timezone.utc)
+    assert keyword["end"] == datetime(2026, 5, 13, 12, 0, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_event_list_naive_start_is_utc() -> None:
+    from datetime import datetime, timezone
+
+    keyword = await _dispatch_event_list(
+        "protect_list_smart_detections",
+        "list_smart_detections",
+        {"start": "2026-05-12T12:00:00", "end": "2026-05-13T12:00:00Z"},
+    )
+
+    assert keyword["start"] == datetime(2026, 5, 12, 12, 0, 0, tzinfo=timezone.utc)
+
+
+@pytest.mark.asyncio
+async def test_dispatch_event_list_rejects_unparseable_start() -> None:
+    with pytest.raises(ValueError, match="Invalid isoformat string"):
+        await _dispatch_event_list("protect_list_events", "list_events", {"start": "yesterday"})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tool_name", "method"),
+    [("protect_list_events", "list_events"), ("protect_list_smart_detections", "list_smart_detections")],
+)
+async def test_dispatch_event_list_without_range_defaults_to_last_24_hours(tool_name, method) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    before = datetime.now(timezone.utc)
+    keyword = await _dispatch_event_list(tool_name, method, {"limit": 5})
+    after = datetime.now(timezone.utc)
+
+    assert before <= keyword["end"] <= after
+    assert keyword["start"] == keyword["end"] - timedelta(hours=24)
+    assert keyword["limit"] == 5
+
+
 @pytest.mark.asyncio
 async def test_dispatch_translates_delete_recording_iso_to_datetime() -> None:
     """protect_delete_recording: same datetime parsing pattern as export_clip."""

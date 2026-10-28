@@ -503,6 +503,28 @@ def _translate_export_clip(args: dict[str, Any]) -> tuple[tuple[Any, ...], dict[
     return (), kwargs
 
 
+def _translate_event_list(args: dict[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Parse ISO start/end strings and apply the documented range defaults.
+
+    Mirrors the protect event list tools: ``end`` defaults to now and ``start``
+    to 24 hours before ``end``, since the NVR rejects a limit above 100 unless
+    both ends of the range are sent. Naive timestamps are UTC.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    out = dict(args)
+    start = _parse_iso_datetime(out.get("start"))
+    end = _parse_iso_datetime(out.get("end"))
+    if start is not None and start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end is not None and end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+    end = end or datetime.now(timezone.utc)
+    out["start"] = start or end - timedelta(hours=24)
+    out["end"] = end
+    return (), out
+
+
 def _translate_detection_search(args: dict[str, Any]) -> tuple[tuple[Any, ...], dict[str, Any]]:
     out = dict(args)
     out.setdefault("limit", 100)
@@ -1760,6 +1782,27 @@ DISPATCH_ARG_TRANSLATORS: dict[str, ArgTranslatorSpec] = {
     "unifi_create_dynamic_dns": _spec(_translate_create_dynamic_dns, "entry_data"),
     "unifi_update_dynamic_dns": _spec(_translate_update_dynamic_dns, "entry_id", "entry_data"),
     "protect_export_clip": _spec(_translate_export_clip, "camera_id", "start", "end", "channel_index", "fps"),
+    "protect_list_events": _spec(
+        _translate_event_list,
+        "start",
+        "end",
+        "event_type",
+        "camera_id",
+        "limit",
+        "compact",
+        "metadata_fields",
+    ),
+    "protect_list_smart_detections": _spec(
+        _translate_event_list,
+        "start",
+        "end",
+        "camera_id",
+        "detection_type",
+        "min_confidence",
+        "limit",
+        "compact",
+        "metadata_fields",
+    ),
     "protect_search_detections": _spec(
         _translate_detection_search,
         "labels",

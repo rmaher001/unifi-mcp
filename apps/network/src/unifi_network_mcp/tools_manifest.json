@@ -6575,7 +6575,7 @@
         "readOnlyHint": false
       },
       "auth_method": "local_only",
-      "description": "Remove/forget a client from the controller's known client history by MAC address. This permanently deletes the client record including its name, notes, fixed IP settings, and historical stats. The client will reappear as a new unknown device if it reconnects.",
+      "description": "Remove/forget a client from the controller's known client history by MAC address. This permanently deletes the client record including its name, notes, fixed IP settings, and historical stats. The client will reappear as a new unknown device if it reconnects. Only known clients (with a user-table record) can be forgotten; a client that appears only in historical statistics returns an error and nothing is removed.",
       "name": "unifi_forget_client",
       "permission_action": "update",
       "permission_category": "clients",
@@ -12288,7 +12288,7 @@
         "readOnlyHint": true
       },
       "auth_method": "local_only",
-      "description": "Rank clients by traffic inside a time window \u2014 the first call when working an upload or egress spike ('who sent data between 02:00 and 05:00?'). Sums the controller's per-client report over the window; upload_bytes is what each client sent, download_bytes what it received. Use sort_by='upload' for exfiltration questions. Covers clients the controller meters individually (wireless on current gateways); wired clients, cluster nodes included, are absent. Entries with source='live_counters' are a fallback for controllers without the report and are cumulative since association, not scoped to the window.",
+      "description": "Rank clients by traffic inside a time window \u2014 the first call when working an upload or egress spike ('who sent data between 02:00 and 05:00?'). Sums the controller's per-client report over the window; upload_bytes is what each client sent, download_bytes what it received. Use sort_by='upload' for exfiltration questions. Network 11 covers every client; older controllers cover only clients they meter individually (wireless on current gateways), so wired clients, cluster nodes included, are absent there. Entries with source='live_counters' are a fallback for controllers without the report and are cumulative since association, not scoped to the window.",
       "name": "unifi_get_top_clients",
       "schema": {
         "input": {

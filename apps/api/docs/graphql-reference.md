@@ -388,6 +388,16 @@ type CameraAnalytics {
   stats: JSON
 }
 
+"""
+Crossing lines, smart-detect zones and loiter zones of a Protect camera.
+"""
+type CameraDetectionAreas {
+  cameraId: ID
+  cameraName: String
+  areas: [DetectionArea!]!
+  count: Int!
+}
+
 """Paginated page of UniFi Protect cameras."""
 type CameraPage {
   items: [Camera!]!
@@ -582,6 +592,15 @@ type CredentialPage {
 type CustomService {
   name: String
   address: String
+}
+
+"""A crossing line, smart-detect zone or loiter zone on a Protect camera."""
+type DetectionArea {
+  id: ID!
+  name: String
+  kind: String!
+  objectTypes: [String!]!
+  direction: String
 }
 
 """Detection-search filter vocabulary (the 'Find Anything' label groups)."""
@@ -1841,6 +1860,11 @@ type ProtectQuery {
   """Get analytics summary for a Protect camera."""
   cameraAnalytics(controller: ID!, id: ID!): CameraAnalytics
 
+  """
+  List a camera's crossing lines, smart-detect zones and loiter zones (id, name, kind, objectTypes, and direction for lines), read fresh from the NVR.
+  """
+  cameraDetectionAreas(controller: ID!, id: ID!): CameraDetectionAreas
+
   """Get the stream catalog (channels + RTSPS URLs) for a camera."""
   cameraStreams(controller: ID!, id: ID!): CameraStreams
 
@@ -2772,6 +2796,7 @@ Read-only access to UniFi Protect resources.
 - `alarmStatus: AlarmStatus`  — Get the alarm system arm-state snapshot.
 - `camera: Camera`  — Look up a single Protect camera by id.
 - `cameraAnalytics: CameraAnalytics`  — Get analytics summary for a Protect camera.
+- `cameraDetectionAreas: CameraDetectionAreas`  — List a camera's crossing lines, smart-detect zones and loiter zones (id, name, kind, objectTypes, and direction for lines), read fresh from the NVR.
 - `cameraStreams: CameraStreams`  — Get the stream catalog (channels + RTSPS URLs) for a camera.
 - `cameras: CameraPage!`  — List cameras on the Protect controller (paginated).
 - `chimes: ChimePage!`  — List paired Protect chimes (paginated).

@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from unifi_network_mcp.runtime import dpi_manager, traffic_flow_manager
+from unifi_network_mcp.runtime import client_manager, dpi_manager, traffic_flow_manager
 from unifi_network_mcp.tools.traffic_flows import (
     get_traffic_flow_statistics,
     get_traffic_flows,
@@ -29,6 +29,11 @@ _ENVELOPE = {
 
 def test_runtime_wires_dpi_catalog_manager_into_traffic_flow_manager():
     assert traffic_flow_manager._dpi_manager is dpi_manager
+
+
+def test_runtime_wires_client_manager_into_traffic_flow_manager():
+    # source_name falls back to the client list for names filter-data omits.
+    assert traffic_flow_manager._client_manager is client_manager
 
 
 @pytest.mark.asyncio
